@@ -26,8 +26,18 @@ const esc = (s) =>
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
 
+// утилита для склонения "объект/объекта/объектов"
+function pluralRu(n) {
+  n = Math.abs(n) % 100;
+  const n1 = n % 10;
+  if (n > 10 && n < 20) return "ов";
+  if (n1 === 1) return "";
+  if (n1 >= 2 && n1 <= 4) return "а";
+  return "ов";
+}
+
 export default function App() {
-  // ---------------- base state ----------------
+// ---------------- base state ----------------
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [total, setTotal] = useState(0);
@@ -139,6 +149,93 @@ export default function App() {
         setDetailLoading(false);
       });
   }, [detailId]);
+
+  // ===== ADMIN HELPERS =====
+  function updForm(patch) {
+    setForm((f) => ({ ...f, ...patch }));
+  }
+
+  async function uploadPhoto() {
+    try {
+      const file = fileInputRef?.current?.files?.[0];
+      if (!file) {
+        alert("Выберите файл перед загрузкой");
+        return;
+      }
+      const fd = new FormData();
+      fd.append("file", file);
+
+      const res = await fetch(`${API}/api/upload`, { method: "POST", body: fd });
+      if (!res.ok) throw new Error(await res.text());
+
+      const j = await res.json(); // { url: "/uploads/..." }
+      setForm((f) => ({ ...f, photos: [ ...(f.photos || []), j.url ] }));
+
+      if (fileInputRef?.current) fileInputRef.current.value = "";
+      alert("Фото загружено: " + j.url);
+    } catch (e) {
+      console.error(e);
+      alert("Ошибка загрузки фото: " + (e.message || e));
+    }
+  }
+
+  async function createListing() {
+    try {
+      const required = ["title","district","price_amd","bedrooms","area_sqm","floor","lat","lng","type"];
+      for (const k of required) {
+        if (!String(form[k] ?? "").trim()) {
+          alert(`Заполните поле: ${k}`);
+          return;
+        }
+      }
+
+      const payload = {
+        title: form.title.trim(),
+        district: form.district,
+        price_amd: Number(form.price_amd),
+        bedrooms: Number(form.bedrooms),
+        area_sqm: Number(form.area_sqm),
+        floor: Number(form.floor),
+        lat: Number(form.lat),
+        lng: Number(form.lng),
+        type: form.type,
+        photos: form.photos || [],
+      };
+
+      const res = await fetch(`${API}/api/admin/listings`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Admin-Token": adminToken,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) throw new Error(await res.text());
+
+      const created = await res.json();
+      alert("Создано! ID: " + created.id);
+
+      setForm({
+        title: "",
+        district: "",
+        price_amd: "",
+        bedrooms: "",
+        area_sqm: "",
+        floor: "",
+        lat: "",
+        lng: "",
+        type: "apartment",
+        photos: [],
+      });
+      if (fileInputRef?.current) fileInputRef.current.value = "";
+
+      setApplied((s) => ({ ...s }));
+    } catch (e) {
+      console.error(e);
+      alert("Ошибка создания: " + (e.message || e));
+    }
+  }
 
   // -------- helpers for filters --------
   const buildParams = (state) => {
@@ -439,627 +536,18 @@ export default function App() {
     fetch(`${API}/api/listings?${q}`).then(r=>r.json()).then(setItems);
   }
 
-  // -------- render ----------
-  return (
-    <div className="app">
-      <style>{css}</style>
-
-      <div className="mapWrap">
-        <div className="topbar">
-          <div className="logo">White Safe Estate</div>
-          <div className="pill">Yerevan</div>
-          <button className="btn" onClick={() => setShowAdmin(!showAdmin)}>⚙ Админ</button>
-        </div>
-        <div id="map" ref={mapRef}></div>
-      </div>
-
-      <aside className="side">
-        <div className="topbar">
-          <div className="muted">Фильтры</div>
-          <div className="row" style={{ marginLeft: "auto", gap: 8 }}>
-            <select
-              className="btn"
-              value={sort}
-              onChange={(e) => setSort(e.target.value)}
-              title="Сортировка"
-            >
-              <option value="newest">Свежее</option>
-              <option value="price_asc">Цена ↑</option>
-              <option value="price_desc">Цена ↓</option>
-              <option value="area_asc">Площадь ↑</option>
-              <option value="area_desc">Площадь ↓</option>
-            </select>
-
-            <button
-              className="btn"
-              onClick={() =>
-                setApplied((s) => ({
-                  ...s,
-                  currency: s.currency === "AMD" ? "USD" : "AMD",
-                }))
-              }
-              title="Валюта цен"
-            >
-              {applied.currency}
-            </button>
-
-            <button
-              className="btn"
-              onClick={() => {
-                setShowFilters(!showFilters);
-                if (!showFilters) setDraft(applied);
-              }}
-            >
-              {showFilters ? "Скрыть фильтры" : "Показать фильтры"}
-            </button>
-          </div>
-        </div>
-
-        <div className="panel">
-          {showFilters && (
-            <>
-              <div className="filters">
-                {/* DISTRICTS */}
-                <div className="field col2">
-                  <label>Районы</label>
-                  <select
-                    className="btn"
-                    multiple
-                    size={7}
-                    value={draft.districts}
-                    onChange={onDistrictsChange}
-                    style={{ height: 140 }}
-                  >
-                    {DISTRICTS.map((d) => (
-                      <option key={d} value={d}>
-                        {d}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* PRICE */}
-                <div className="field">
-                  <label>Цена {applied.currency === "USD" ? "($)" : "(AMD)"} — от</label>
-                  <input
-                    className="btn"
-                    type="number"
-                    min="0"
-                    value={draft.priceFrom}
-                    onChange={(e) => updateDraft({ priceFrom: e.target.value })}
-                    placeholder={applied.currency === "USD" ? "напр. 800" : "напр. 300000"}
-                  />
-                </div>
-                <div className="field">
-                  <label>Цена — до</label>
-                  <input
-                    className="btn"
-                    type="number"
-                    min="0"
-                    value={draft.priceTo}
-                    onChange={(e) => updateDraft({ priceTo: e.target.value })}
-                    placeholder={applied.currency === "USD" ? "напр. 2000" : "напр. 900000"}
-                  />
-                </div>
-
-                {/* BEDROOMS */}
-                <div className="field">
-                  <label>Спальни</label>
-                  <select
-                    className="btn"
-                    value={String(draft.bedrooms)}
-                    onChange={(e) =>
-                      updateDraft({
-                        bedrooms:
-                          e.target.value === "" ? "" : Number(e.target.value),
-                      })
-                    }
-                  >
-                    <option value="">Любые</option>
-                    <option value="0">Студия</option>
-                    <option value="1">1</option>
-                    <option value="2">2</option>
-                    <option value="3">3+</option>
-                  </select>
-                </div>
-
-                {/* AREA */}
-                <div className="field">
-                  <label>Площадь (м²) — от</label>
-                  <input
-                    className="btn"
-                    type="number"
-                    min="0"
-                    value={draft.areaFrom}
-                    onChange={(e) => updateDraft({ areaFrom: e.target.value })}
-                    placeholder="м² от"
-                  />
-                </div>
-                <div className="field">
-                  <label>Площадь (м²) — до</label>
-                  <input
-                    className="btn"
-                    type="number"
-                    min="0"
-                    value={draft.areaTo}
-                    onChange={(e) => updateDraft({ areaTo: e.target.value })}
-                    placeholder="м² до"
-                  />
-                </div>
-
-                {/* FLOOR */}
-                <div className="field">
-                  <label>Этаж — от</label>
-                  <input
-                    className="btn"
-                    type="number"
-                    value={draft.floorFrom}
-                    onChange={(e) => updateDraft({ floorFrom: e.target.value })}
-                    placeholder="от"
-                  />
-                </div>
-                <div className="field">
-                  <label>Этаж — до</label>
-                  <input
-                    className="btn"
-                    type="number"
-                    value={draft.floorTo}
-                    onChange={(e) => updateDraft({ floorTo: e.target.value })}
-                    placeholder="до"
-                  />
-                </div>
-
-                {/* NEW */}
-                <div className="field">
-                  <label>Новостройка</label>
-                  <select
-                    className="btn"
-                    value={String(draft.isNew)}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      updateDraft({ isNew: v === "" ? "" : v === "true" });
-                    }}
-                  >
-                    <option value="">Не важно</option>
-                    <option value="true">Да</option>
-                    <option value="false">Нет</option>
-                  </select>
-                </div>
-
-                {/* PPS */}
-                <div className="field">
-                  <label>Цена за м² — от</label>
-                  <input
-                    className="btn"
-                    type="number"
-                    min="0"
-                    value={draft.ppsFrom}
-                    onChange={(e) => updateDraft({ ppsFrom: e.target.value })}
-                    placeholder="от"
-                  />
-                </div>
-                <div className="field">
-                  <label>Цена за м² — до</label>
-                  <input
-                    className="btn"
-                    type="number"
-                    min="0"
-                    value={draft.ppsTo}
-                    onChange={(e) => updateDraft({ ppsTo: e.target.value })}
-                    placeholder="до"
-                  />
-                </div>
-
-                {/* Furniture */}
-                <div className="field">
-                  <label>Мебель</label>
-                  <select
-                    className="btn"
-                    value={String(draft.isFurnished)}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      updateDraft({ isFurnished: v === "" ? "" : v === "true" });
-                    }}
-                  >
-                    <option value="">Неважно</option>
-                    <option value="true">Меблирована</option>
-                    <option value="false">Без мебели</option>
-                  </select>
-                </div>
-
-                {/* Bathroom */}
-                <label className="btn">
-                  <input
-                    type="checkbox"
-                    checked={draft.bathShower}
-                    onChange={(e) => updateDraft({ bathShower: e.target.checked })}
-                  />
-                  &nbsp;Душ
-                </label>
-                <label className="btn">
-                  <input
-                    type="checkbox"
-                    checked={draft.bathTub}
-                    onChange={(e) => updateDraft({ bathTub: e.target.checked })}
-                  />
-                  &nbsp;Ванна
-                </label>
-
-                {/* Appliances */}
-                <label className="btn">
-                  <input
-                    type="checkbox"
-                    checked={draft.hasAC}
-                    onChange={(e) => updateDraft({ hasAC: e.target.checked })}
-                  />
-                  &nbsp;Кондиционер
-                </label>
-                <label className="btn">
-                  <input
-                    type="checkbox"
-                    checked={draft.hasOven}
-                    onChange={(e) => updateDraft({ hasOven: e.target.checked })}
-                  />
-                  &nbsp;Духовой шкаф
-                </label>
-                <label className="btn">
-                  <input
-                    type="checkbox"
-                    checked={draft.hasDishwasher}
-                    onChange={(e) =>
-                      updateDraft({ hasDishwasher: e.target.checked })
-                    }
-                  />
-                  &nbsp;Посудомоечная
-                </label>
-                <label className="btn">
-                  <input
-                    type="checkbox"
-                    checked={draft.hasTV}
-                    onChange={(e) => updateDraft({ hasTV: e.target.checked })}
-                  />
-                  &nbsp;Телевизор
-                </label>
-                <label className="btn">
-                  <input
-                    type="checkbox"
-                    checked={draft.hasWiFi}
-                    onChange={(e) => updateDraft({ hasWiFi: e.target.checked })}
-                  />
-                  &nbsp;Wi-Fi
-                </label>
-                <label className="btn">
-                  <input
-                    type="checkbox"
-                    checked={draft.hasMicrowave}
-                    onChange={(e) =>
-                      updateDraft({ hasMicrowave: e.target.checked })
-                    }
-                  />
-                  &nbsp;Микроволновка
-                </label>
-                <label className="btn">
-                  <input
-                    type="checkbox"
-                    checked={draft.hasFridge}
-                    onChange={(e) => updateDraft({ hasFridge: e.target.checked })}
-                  />
-                  &nbsp;Холодильник
-                </label>
-
-                {/* Type / house */}
-                <div className="field">
-                  <label>Тип</label>
-                  <select
-                    className="btn"
-                    value={draft.type}
-                    onChange={(e) => updateDraft({ type: e.target.value })}
-                  >
-                    <option value="">Любой</option>
-                    <option value="apartment">Квартира</option>
-                    <option value="house">Дом</option>
-                  </select>
-                </div>
-
-                <div className="field">
-                  <label>Свой двор (для дома)</label>
-                  <select
-                    className="btn"
-                    value={String(draft.isHouseYard)}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      updateDraft({ isHouseYard: v === "" ? "" : v === "true" });
-                    }}
-                  >
-                    <option value="">Не важно</option>
-                    <option value="true">Есть</option>
-                    <option value="false">Нет</option>
-                  </select>
-                </div>
-
-                <div className="field">
-                  <label>Дом полностью/часть</label>
-                  <select
-                    className="btn"
-                    value={draft.housePart}
-                    onChange={(e) => updateDraft({ housePart: e.target.value })}
-                  >
-                    <option value="">Любой</option>
-                    <option value="full">Полностью</option>
-                    <option value="part">Часть дома</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="row" style={{ gap: 8, marginBottom: 12 }}>
-                <button className="btn" onClick={resetDraft}>
-                  Сбросить
-                </button>
-                <button className="btn primary" onClick={applyDraft}>
-                  {previewCount == null
-                    ? "Показать"
-                    : `Показать ${previewCount} объект${pluralRu(previewCount)}`}
-                </button>
-              </div>
-            </>
-          )}
-
-          <div className="muted" style={{ marginBottom: 8 }}>
-            Найдено: <b>{loading ? "..." : total}</b>
-          </div>
-
-          {loading ? (
-            <div className="card">Загрузка…</div>
-          ) : items.length === 0 ? (
-            <div className="card">Ничего не найдено</div>
-          ) : null}
-
-          {items.map((x) => (
-            <div
-              key={x.id}
-              className="card hoverable"
-              onMouseEnter={() => focusMarker(x.id)}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  gap: 12,
-                }}
-              >
-                <div style={{ fontWeight: 600 }}>{x.title}</div>
-                <div className="price">
-                  {applied.currency === "USD"
-                    ? `$${Math.round(x.price_usd).toLocaleString()}`
-                    : `${Number(x.price_amd).toLocaleString()} AMD`}
-                </div>
-              </div>
-              <div className="muted">
-                {x.district} • {x.bedrooms}-комн • {x.area_sqm} м² • эт. {x.floor}{" "}
-                {x.is_new_building ? "• Новостройка" : ""}
-                {x.type === "house" ? " • Дом" : ""}
-              </div>
-              <div className="row" style={{ marginTop: 8 }}>
-                {x.has_ac && <div className="pill">AC</div>}
-                {x.has_wifi && <div className="pill">Wi-Fi</div>}
-                {x.has_tv && <div className="pill">TV</div>}
-                {x.has_fridge && <div className="pill">Холодильник</div>}
-                {x.has_dishwasher && <div className="pill">ПММ</div>}
-                {x.has_oven && <div className="pill">Духовка</div>}
-              </div>
-              <div className="row" style={{ marginTop: 8 }}>
-                <button className="btn" onClick={() => focusMarker(x.id)}>
-                  Показать на карте
-                </button>
-                <button className="btn primary" onClick={() => openDetail(x.id)}>
-                  Показать полностью
-                </button>
-                {showAdmin && (
-                  <>
-                    <button className="btn" onClick={() => setEdit((e)=>({...e, id: x.id}))}>Редакт.</button>
-                    <button className="btn" onClick={() => deleteListing(x.id)}>Удалить</button>
-                  </>
-                )}
-              </div>
-            </div>
-          ))}
-
-          {/* ADMIN PANEL */}
-          {showAdmin && (
-            <div className="card" style={{ marginTop: 20 }}>
-              <h3>Админ-панель</h3>
-
-              <div className="field">
-                <label>Admin Token</label>
-                <input className="input" value={adminToken} onChange={e=>setAdminToken(e.target.value)} />
-              </div>
-
-              <hr style={{ margin: "12px 0", borderColor: "#e5e7eb" }}/>
-
-              <div className="muted" style={{ marginBottom:8 }}>Создать объект</div>
-              <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
-                {["title","district","price_amd","bedrooms","area_sqm","floor","lat","lng"].map(f=>(
-                  <input key={f} className="input" placeholder={f} value={form[f]} onChange={e=>setForm({...form,[f]:e.target.value})}/>
-                ))}
-                <select className="input" value={form.type} onChange={e=>setForm({...form, type: e.target.value})}>
-                  <option value="apartment">apartment</option>
-                  <option value="house">house</option>
-                </select>
-              </div>
-              <div className="row" style={{ marginTop:8 }}>
-                <input ref={fileInputRef} type="file" accept="image/*" className="input" />
-                <button className="btn" onClick={async()=>{
-                  const f = fileInputRef.current?.files?.[0];
-                  if (!f) return;
-                  try {
-                    const url = await uploadPhoto(f);
-                    setForm((s)=>({...s, photos: [...(s.photos||[]), url]}));
-                    fileInputRef.current.value = "";
-                  } catch(e){
-                    alert("Upload error");
-                  }
-                }}>Загрузить фото</button>
-              </div>
-              <div className="muted" style={{marginTop:6}}>
-                Фото: {(form.photos||[]).length ? form.photos.join(", ") : "нет"}
-              </div>
-
-              <div className="row" style={{ marginTop:10 }}>
-                <button className="btn primary" onClick={createListing}>Создать</button>
-              </div>
-
-              <hr style={{ margin: "12px 0", borderColor: "#e5e7eb" }}/>
-
-              <div className="muted" style={{ marginBottom:8 }}>Редактирование (упрощённо)</div>
-              <div className="row" style={{ flexWrap:"wrap" }}>
-                <input className="input" style={{minWidth:100}} placeholder="ID" value={edit.id} onChange={e=>setEdit({...edit, id: e.target.value})}/>
-                <input className="input" placeholder="Новая цена AMD" value={edit.price_amd} onChange={e=>setEdit({...edit, price_amd: e.target.value})}/>
-                <input className="input" placeholder="Добавить фото URL" value={edit.addPhotoUrl} onChange={e=>setEdit({...edit, addPhotoUrl: e.target.value})}/>
-              </div>
-              <div className="row" style={{ marginTop:8 }}>
-                <button className="btn" onClick={updateListing}>Сохранить</button>
-                <button className="btn" onClick={()=> { if(edit.id) deleteListing(edit.id); }}>Удалить по ID</button>
-              </div>
-            </div>
-          )}
-        </div>
-      </aside>
-
-      {/* PREVIEW SHEET (клик по пину) */}
-      {preview && (
-        <div className="sheet" role="dialog" aria-label="Предпросмотр">
-          <div className="sheet-card">
-            <div className="sheet-head">
-              <div className="sheet-title">{preview.title}</div>
-              <button className="btn" onClick={() => setPreview(null)}>✕</button>
-            </div>
-            <div className="muted" style={{marginBottom:8}}>
-              {preview.district} • {preview.bedrooms}-комн • {preview.area_sqm} м² • эт. {preview.floor}
-            </div>
-            <div className="price" style={{marginBottom:12}}>
-              {applied.currency === "USD"
-                ? `$${Math.round(preview.price_usd).toLocaleString()}`
-                : `${Number(preview.price_amd).toLocaleString()} AMD`}
-            </div>
-            <div className="row">
-              <button
-                className="btn"
-                onClick={() =>
-                  showOnMap({ id: preview.id, lat: preview.lat, lng: preview.lng, title: preview.title })
-                }
-              >
-                Показать на карте
-              </button>
-              <button className="btn primary" onClick={() => openDetail(preview.id)}>
-                Показать полностью
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* DETAIL DRAWER (полная карточка) */}
-      {detailId && (
-        <div className="drawer" role="dialog" aria-label="Карточка квартиры">
-          <div className="drawer-card">
-            <div className="drawer-head">
-              <button className="btn" onClick={closeDetail}>← Назад</button>
-              <div className="drawer-title">{detail?.title || "Объект"}</div>
-            </div>
-
-            {detailLoading ? (
-              <div className="card">Загрузка...</div>
-            ) : detail ? (
-              <>
-                {/* Галерея — пока заглушка */}
-                <div className="gallery">
-                  <div className="gallery-item">Фото 1 (заглушка)</div>
-                  <div className="gallery-item">Фото 2 (заглушка)</div>
-                  <div className="gallery-item">Фото 3 (заглушка)</div>
-                </div>
-
-                {/* Цена и краткие хар-ки */}
-                <div className="card">
-                  <div className="row" style={{justifyContent:"space-between", alignItems:"center"}}>
-                    <div className="price">
-                      {applied.currency === "USD"
-                        ? `$${Math.round(detail.price_usd).toLocaleString()}`
-                        : `${Number(detail.price_amd).toLocaleString()} AMD`}
-                    </div>
-                    <div className="pill">{detail.district}</div>
-                  </div>
-                  <div className="muted" style={{marginTop:6}}>
-                    {detail.bedrooms}-комн • {detail.area_sqm} м² • эт. {detail.floor} {detail.is_new_building ? "• Новостройка" : ""}
-                  </div>
-                  <div className="row" style={{marginTop:10}}>
-                    {detail.has_ac && <div className="pill">AC</div>}
-                    {detail.has_wifi && <div className="pill">Wi-Fi</div>}
-                    {detail.has_tv && <div className="pill">TV</div>}
-                    {detail.has_fridge && <div className="pill">Холодильник</div>}
-                    {detail.has_dishwasher && <div className="pill">ПММ</div>}
-                    {detail.has_oven && <div className="pill">Духовка</div>}
-                  </div>
-                </div>
-
-                {/* Описание */}
-                <div className="card">
-                  <div style={{fontWeight:600, marginBottom:6}}>Описание</div>
-                  <div className="muted">
-                    {detail?.description ? detail.description : "Описание будет добавлено."}
-                  </div>
-                </div>
-
-                {/* Адрес и локация */}
-                <div className="card">
-                  <div style={{fontWeight:600, marginBottom:6}}>Адрес и локация</div>
-                  <div className="muted">{detail.address || "Ереван"}</div>
-                  <div className="row" style={{marginTop:8}}>
-                    <button
-                      className="btn"
-                      onClick={() =>
-                        showOnMap({ id: detail.id, lat: detail.lat, lng: detail.lng, title: detail.title })
-                      }
-                    >
-                      Показать на карте
-                    </button>
-                  </div>
-                </div>
-
-                {/* Контакты */}
-                <div className="card">
-                  <div style={{fontWeight:600, marginBottom:6}}>Контакты</div>
-                  <div className="muted">Написать менеджеру (кнопка будет вести в бот)</div>
-                  <div className="row" style={{marginTop:8}}>
-                    <button className="btn primary">Написать</button>
-                    <button className="btn">Позвонить</button>
-                  </div>
-                </div>
-              </>
-            ) : (
-              <div className="card">Не удалось загрузить объект</div>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function pluralRu(n){
-  n = Math.abs(n) % 100;
-  const n1 = n % 10;
-  if (n > 10 && n < 20) return "ов";
-  if (n1 > 1 && n1 < 5) return "а";
-  if (n1 === 1) return "";
-  return "ов";
-}
-
+// ---------------- styles ----------------
 const css = `
 html, body, #root { height: 100%; margin: 0; }
 body { font-family: -apple-system, system-ui, Segoe UI, Roboto, Arial, sans-serif; background: #f6f7f9; color:#0f172a; }
 .app { display: grid; grid-template-columns: 1fr 460px; height: 100%; }
-@media (max-width: 900px) { .app { grid-template-columns: 1fr; } .side { order:-1; height: 54%; position:relative; z-index:5; } .mapWrap{ height: 46%; } }
+
+@media (max-width: 900px) {
+  .app { grid-template-columns: 1fr; }
+  .side { order:-1; height: 54%; position:relative; z-index:5; }
+  .mapWrap { height: 46%; }
+}
+
 .topbar { display:flex; align-items:center; gap:12px; padding:12px 16px; background:#fff; border-bottom:1px solid #e5e7eb; position:sticky; top:0; z-index:10;}
 .logo { font-weight:700; letter-spacing:.2px; }
 .mapWrap { position:relative; z-index:0; }
@@ -1078,9 +566,7 @@ body { font-family: -apple-system, system-ui, Segoe UI, Roboto, Arial, sans-seri
 .leaflet-tooltip-pane,
 .leaflet-top,
 .leaflet-bottom,
-.leaflet-control {
-  z-index: 0 !important;
-}
+.leaflet-control { z-index: 0 !important; }
 
 #map { width:100%; height: calc(100% - 56px); }
 .panel { padding:12px; overflow:auto; height: calc(100% - 56px); }
@@ -1113,3 +599,608 @@ body { font-family: -apple-system, system-ui, Segoe UI, Roboto, Arial, sans-seri
 .gallery { display:grid; grid-template-columns: repeat(3, 1fr); gap:8px; padding:12px; }
 .gallery-item { background:#f1f5f9; border:1px solid #e2e8f0; aspect-ratio: 4/3; border-radius:12px; display:flex; align-items:center; justify-content:center; color:#475569; }
 `;
+
+// -------- render ----------
+return (
+  <div className="app">
+    <style>{css}</style>
+
+    {/* MAP COLUMN */}
+    <div className="mapWrap">
+      <div className="topbar">
+        <div className="logo">White Safe Estate</div>
+        <div className="pill">Yerevan</div>
+        <button className="btn" onClick={() => setShowAdmin(!showAdmin)}>⚙ Админ</button>
+      </div>
+      <div id="map" ref={mapRef}></div>
+    </div>
+
+    {/* SIDE COLUMN */}
+    <aside className="side">
+      <div className="topbar">
+        <div className="muted">Фильтры</div>
+        <div className="row" style={{ marginLeft: "auto", gap: 8 }}>
+          <select
+            className="btn"
+            value={sort}
+            onChange={(e) => setSort(e.target.value)}
+            title="Сортировка"
+          >
+            <option value="newest">Свежее</option>
+            <option value="price_asc">Цена ↑</option>
+            <option value="price_desc">Цена ↓</option>
+            <option value="area_asc">Площадь ↑</option>
+            <option value="area_desc">Площадь ↓</option>
+          </select>
+
+          <button
+            className="btn"
+            onClick={() =>
+              setApplied((s) => ({
+                ...s,
+                currency: s.currency === "AMD" ? "USD" : "AMD",
+              }))
+            }
+            title="Валюта цен"
+          >
+            {applied.currency}
+          </button>
+
+          <button
+            className="btn"
+            onClick={() => {
+              setShowFilters(!showFilters);
+              if (!showFilters) setDraft(applied);
+            }}
+          >
+            {showFilters ? "Скрыть фильтры" : "Показать фильтры"}
+          </button>
+        </div>
+      </div>
+
+      <div className="panel">
+        {/* === АДМИН-ПАНЕЛЬ (перед фильтрами) === */}
+        {showAdmin && (
+          <div className="card" style={{ marginBottom: 16 }}>
+            <div style={{ fontWeight: 700, fontSize: 20, marginBottom: 8 }}>Админ-панель</div>
+
+            <div className="field">
+              <label>Admin Token</label>
+              <input className="btn" value={adminToken} onChange={(e) => setAdminToken(e.target.value)} />
+            </div>
+
+            <hr style={{ border: "none", borderTop: "1px solid #e5e7eb", margin: "12px 0" }} />
+
+            <div style={{ fontWeight: 600, marginBottom: 8 }}>Создать объект</div>
+
+            <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+              <input className="btn" placeholder="title" value={form.title}
+                     onChange={(e) => updForm({ title: e.target.value })} style={{ flex: "1 1 260px" }} />
+              <input className="btn" placeholder="district (Kentron/Arabkir/...)" value={form.district}
+                     onChange={(e) => updForm({ district: e.target.value })} style={{ flex: "1 1 200px" }} />
+            </div>
+
+            <div className="row" style={{ gap: 8, marginTop: 8 }}>
+              <input className="btn" placeholder="price_amd" type="number" value={form.price_amd}
+                     onChange={(e) => updForm({ price_amd: e.target.value })} style={{ flex: "1 1 160px" }} />
+              <input className="btn" placeholder="bedrooms" type="number" value={form.bedrooms}
+                     onChange={(e) => updForm({ bedrooms: e.target.value })} style={{ flex: "1 1 120px" }} />
+            </div>
+
+            <div className="row" style={{ gap: 8, marginTop: 8 }}>
+              <input className="btn" placeholder="area_sqm" type="number" value={form.area_sqm}
+                     onChange={(e) => updForm({ area_sqm: e.target.value })} style={{ flex: "1 1 120px" }} />
+              <input className="btn" placeholder="floor" type="number" value={form.floor}
+                     onChange={(e) => updForm({ floor: e.target.value })} style={{ flex: "1 1 120px" }} />
+            </div>
+
+            <div className="row" style={{ gap: 8, marginTop: 8 }}>
+              <input className="btn" placeholder="lat" type="number" step="0.000001" value={form.lat}
+                     onChange={(e) => updForm({ lat: e.target.value })} style={{ flex: "1 1 160px" }} />
+              <input className="btn" placeholder="lng" type="number" step="0.000001" value={form.lng}
+                     onChange={(e) => updForm({ lng: e.target.value })} style={{ flex: "1 1 160px" }} />
+            </div>
+
+            <div className="row" style={{ gap: 8, marginTop: 8 }}>
+              <select className="btn" value={form.type} onChange={(e) => updForm({ type: e.target.value })}>
+                <option value="apartment">apartment</option>
+                <option value="house">house</option>
+              </select>
+            </div>
+
+            <div className="row" style={{ gap: 8, marginTop: 12 }}>
+              <input ref={fileInputRef} className="btn" type="file" accept="image/*" />
+              <button className="btn" onClick={uploadPhoto}>Загрузить фото</button>
+            </div>
+
+            {(form.photos || []).length > 0 && (
+              <div className="muted" style={{ marginTop: 8 }}>
+                Фото: {(form.photos || []).map((u) => <div key={u}>{u}</div>)}
+              </div>
+            )}
+
+            <div className="row" style={{ gap: 8, marginTop: 12 }}>
+              <button className="btn primary" onClick={createListing}>Создать</button>
+            </div>
+          </div>
+        )}
+
+        {/* ФИЛЬТРЫ */}
+        {showFilters && (
+          <>
+            <div className="filters">
+              {/* DISTRICTS */}
+              <div className="field col2">
+                <label>Районы</label>
+                <select
+                  className="btn"
+                  multiple
+                  size={7}
+                  value={draft.districts}
+                  onChange={onDistrictsChange}
+                  style={{ height: 140 }}
+                >
+                  {DISTRICTS.map((d) => (
+                    <option key={d} value={d}>{d}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* PRICE */}
+              <div className="field">
+                <label>Цена {applied.currency === "USD" ? "($)" : "(AMD)"} — от</label>
+                <input
+                  className="btn"
+                  type="number"
+                  min="0"
+                  value={draft.priceFrom}
+                  onChange={(e) => updateDraft({ priceFrom: e.target.value })}
+                  placeholder={applied.currency === "USD" ? "напр. 800" : "напр. 300000"}
+                />
+              </div>
+              <div className="field">
+                <label>Цена — до</label>
+                <input
+                  className="btn"
+                  type="number"
+                  min="0"
+                  value={draft.priceTo}
+                  onChange={(e) => updateDraft({ priceTo: e.target.value })}
+                  placeholder={applied.currency === "USD" ? "напр. 2000" : "напр. 900000"}
+                />
+              </div>
+
+              {/* BEDROOMS */}
+              <div className="field">
+                <label>Спальни</label>
+                <select
+                  className="btn"
+                  value={String(draft.bedrooms)}
+                  onChange={(e) =>
+                    updateDraft({
+                      bedrooms: e.target.value === "" ? "" : Number(e.target.value),
+                    })
+                  }
+                >
+                  <option value="">Любые</option>
+                  <option value="0">Студия</option>
+                  <option value="1">1</option>
+                  <option value="2">2</option>
+                  <option value="3">3+</option>
+                </select>
+              </div>
+
+              {/* AREA */}
+              <div className="field">
+                <label>Площадь (м²) — от</label>
+                <input
+                  className="btn"
+                  type="number"
+                  min="0"
+                  value={draft.areaFrom}
+                  onChange={(e) => updateDraft({ areaFrom: e.target.value })}
+                  placeholder="м² от"
+                />
+              </div>
+              <div className="field">
+                <label>Площадь (м²) — до</label>
+                <input
+                  className="btn"
+                  type="number"
+                  min="0"
+                  value={draft.areaTo}
+                  onChange={(e) => updateDraft({ areaTo: e.target.value })}
+                  placeholder="м² до"
+                />
+              </div>
+
+              {/* FLOOR */}
+              <div className="field">
+                <label>Этаж — от</label>
+                <input
+                  className="btn"
+                  type="number"
+                  value={draft.floorFrom}
+                  onChange={(e) => updateDraft({ floorFrom: e.target.value })}
+                  placeholder="от"
+                />
+              </div>
+              <div className="field">
+                <label>Этаж — до</label>
+                <input
+                  className="btn"
+                  type="number"
+                  value={draft.floorTo}
+                  onChange={(e) => updateDraft({ floorTo: e.target.value })}
+                  placeholder="до"
+                />
+              </div>
+
+              {/* NEW */}
+              <div className="field">
+                <label>Новостройка</label>
+                <select
+                  className="btn"
+                  value={String(draft.isNew)}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    updateDraft({ isNew: v === "" ? "" : v === "true" });
+                  }}
+                >
+                  <option value="">Не важно</option>
+                  <option value="true">Да</option>
+                  <option value="false">Нет</option>
+                </select>
+              </div>
+
+              {/* PPS */}
+              <div className="field">
+                <label>Цена за м² — от</label>
+                <input
+                  className="btn"
+                  type="number"
+                  min="0"
+                  value={draft.ppsFrom}
+                  onChange={(e) => updateDraft({ ppsFrom: e.target.value })}
+                  placeholder="от"
+                />
+              </div>
+              <div className="field">
+                <label>Цена за м² — до</label>
+                <input
+                  className="btn"
+                  type="number"
+                  min="0"
+                  value={draft.ppsTo}
+                  onChange={(e) => updateDraft({ ppsTo: e.target.value })}
+                  placeholder="до"
+                />
+              </div>
+
+              {/* Furniture */}
+              <div className="field">
+                <label>Мебель</label>
+                <select
+                  className="btn"
+                  value={String(draft.isFurnished)}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    updateDraft({ isFurnished: v === "" ? "" : v === "true" });
+                  }}
+                >
+                  <option value="">Неважно</option>
+                  <option value="true">Меблирована</option>
+                  <option value="false">Без мебели</option>
+                </select>
+              </div>
+
+              {/* Bathroom */}
+              <label className="btn">
+                <input
+                  type="checkbox"
+                  checked={draft.bathShower}
+                  onChange={(e) => updateDraft({ bathShower: e.target.checked })}
+                />
+                &nbsp;Душ
+              </label>
+              <label className="btn">
+                <input
+                  type="checkbox"
+                  checked={draft.bathTub}
+                  onChange={(e) => updateDraft({ bathTub: e.target.checked })}
+                />
+                &nbsp;Ванна
+              </label>
+
+              {/* Appliances */}
+              <label className="btn">
+                <input
+                  type="checkbox"
+                  checked={draft.hasAC}
+                  onChange={(e) => updateDraft({ hasAC: e.target.checked })}
+                />
+                &nbsp;Кондиционер
+              </label>
+              <label className="btn">
+                <input
+                  type="checkbox"
+                  checked={draft.hasOven}
+                  onChange={(e) => updateDraft({ hasOven: e.target.checked })}
+                />
+                &nbsp;Духовой шкаф
+              </label>
+              <label className="btn">
+                <input
+                  type="checkbox"
+                  checked={draft.hasDishwasher}
+                  onChange={(e) => updateDraft({ hasDishwasher: e.target.checked })}
+                />
+                &nbsp;Посудомоечная
+              </label>
+              <label className="btn">
+                <input
+                  type="checkbox"
+                  checked={draft.hasTV}
+                  onChange={(e) => updateDraft({ hasTV: e.target.checked })}
+                />
+                &nbsp;Телевизор
+              </label>
+              <label className="btn">
+                <input
+                  type="checkbox"
+                  checked={draft.hasWiFi}
+                  onChange={(e) => updateDraft({ hasWiFi: e.target.checked })}
+                />
+                &nbsp;Wi-Fi
+              </label>
+              <label className="btn">
+                <input
+                  type="checkbox"
+                  checked={draft.hasMicrowave}
+                  onChange={(e) => updateDraft({ hasMicrowave: e.target.checked })}
+                />
+                &nbsp;Микроволновка
+              </label>
+              <label className="btn">
+                <input
+                  type="checkbox"
+                  checked={draft.hasFridge}
+                  onChange={(e) => updateDraft({ hasFridge: e.target.checked })}
+                />
+                &nbsp;Холодильник
+              </label>
+
+              {/* Type / house */}
+              <div className="field">
+                <label>Тип</label>
+                <select
+                  className="btn"
+                  value={draft.type}
+                  onChange={(e) => updateDraft({ type: e.target.value })}
+                >
+                  <option value="">Любой</option>
+                  <option value="apartment">Квартира</option>
+                  <option value="house">Дом</option>
+                </select>
+              </div>
+
+              <div className="field">
+                <label>Свой двор (для дома)</label>
+                <select
+                  className="btn"
+                  value={String(draft.isHouseYard)}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    updateDraft({ isHouseYard: v === "" ? "" : v === "true" });
+                  }}
+                >
+                  <option value="">Не важно</option>
+                  <option value="true">Есть</option>
+                  <option value="false">Нет</option>
+                </select>
+              </div>
+
+              <div className="field">
+                <label>Дом полностью/часть</label>
+                <select
+                  className="btn"
+                  value={draft.housePart}
+                  onChange={(e) => updateDraft({ housePart: e.target.value })}
+                >
+                  <option value="">Любой</option>
+                  <option value="full">Полностью</option>
+                  <option value="part">Часть дома</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="row" style={{ gap: 8, marginBottom: 12 }}>
+              <button className="btn" onClick={resetDraft}>Сбросить</button>
+              <button className="btn primary" onClick={applyDraft}>
+                {previewCount == null
+                  ? "Показать"
+                  : `Показать ${previewCount} объект${pluralRu(previewCount)}`}
+              </button>
+            </div>
+          </>
+        )}
+
+        <div className="muted" style={{ marginBottom: 8 }}>
+          Найдено: <b>{loading ? "..." : total}</b>
+        </div>
+
+        {loading ? (
+          <div className="card">Загрузка…</div>
+        ) : items.length === 0 ? (
+          <div className="card">Ничего не найдено</div>
+        ) : null}
+
+        {items.map((x) => (
+          <div
+            key={x.id}
+            className="card hoverable"
+            onMouseEnter={() => focusMarker(x.id)}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: 12,
+              }}
+            >
+              <div style={{ fontWeight: 600 }}>{x.title}</div>
+              <div className="price">
+                {applied.currency === "USD"
+                  ? `$${Math.round(x.price_usd).toLocaleString()}`
+                  : `${Number(x.price_amd).toLocaleString()} AMD`}
+              </div>
+            </div>
+            <div className="muted">
+              {x.district} • {x.bedrooms}-комн • {x.area_sqm} м² • эт. {x.floor}{" "}
+              {x.is_new_building ? "• Новостройка" : ""}
+              {x.type === "house" ? " • Дом" : ""}
+            </div>
+            <div className="row" style={{ marginTop: 8 }}>
+              {x.has_ac && <div className="pill">AC</div>}
+              {x.has_wifi && <div className="pill">Wi-Fi</div>}
+              {x.has_tv && <div className="pill">TV</div>}
+              {x.has_fridge && <div className="pill">Холодильник</div>}
+              {x.has_dishwasher && <div className="pill">ПММ</div>}
+              {x.has_oven && <div className="pill">Духовка</div>}
+            </div>
+            <div className="row" style={{ marginTop: 8 }}>
+              <button className="btn" onClick={() => focusMarker(x.id)}>
+                Показать на карте
+              </button>
+              <button className="btn primary" onClick={() => openDetail(x.id)}>
+                Показать полностью
+              </button>
+              {showAdmin && (
+                <>
+                  <button className="btn" onClick={() => setEdit((e) => ({ ...e, id: x.id }))}>
+                    Редакт.
+                  </button>
+                  <button className="btn" onClick={() => deleteListing(x.id)}>Удалить</button>
+                </>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </aside>
+
+    {/* PREVIEW SHEET (клик по пину) */}
+    {preview && (
+      <div className="sheet" role="dialog" aria-label="Предпросмотр">
+        <div className="sheet-card">
+          <div className="sheet-head">
+            <div className="sheet-title">{preview.title}</div>
+            <button className="btn" onClick={() => setPreview(null)}>✕</button>
+          </div>
+          <div className="muted" style={{marginBottom:8}}>
+            {preview.district} • {preview.bedrooms}-комн • {preview.area_sqm} м² • эт. {preview.floor}
+          </div>
+          <div className="price" style={{marginBottom:12}}>
+            {applied.currency === "USD"
+              ? `$${Math.round(preview.price_usd).toLocaleString()}`
+              : `${Number(preview.price_amd).toLocaleString()} AMD`}
+          </div>
+          <div className="row">
+            <button
+              className="btn"
+              onClick={() =>
+                showOnMap({ id: preview.id, lat: preview.lat, lng: preview.lng, title: preview.title })
+              }
+            >
+              Показать на карте
+            </button>
+            <button className="btn primary" onClick={() => openDetail(preview.id)}>
+              Показать полностью
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* DETAIL DRAWER (полная карточка) */}
+    {detailId && (
+      <div className="drawer" role="dialog" aria-label="Карточка квартиры">
+        <div className="drawer-card">
+          <div className="drawer-head">
+            <button className="btn" onClick={closeDetail}>← Назад</button>
+            <div className="drawer-title">{detail?.title || "Объект"}</div>
+          </div>
+
+          {detailLoading ? (
+            <div className="card">Загрузка...</div>
+          ) : detail ? (
+            <>
+              <div className="gallery">
+                <div className="gallery-item">Фото 1 (заглушка)</div>
+                <div className="gallery-item">Фото 2 (заглушка)</div>
+                <div className="gallery-item">Фото 3 (заглушка)</div>
+              </div>
+
+              <div className="card">
+                <div className="row" style={{justifyContent:"space-between", alignItems:"center"}}>
+                  <div className="price">
+                    {applied.currency === "USD"
+                      ? `$${Math.round(detail.price_usd).toLocaleString()}`
+                      : `${Number(detail.price_amd).toLocaleString()} AMD`}
+                  </div>
+                  <div className="pill">{detail.district}</div>
+                </div>
+                <div className="muted" style={{marginTop:6}}>
+                  {detail.bedrooms}-комн • {detail.area_sqm} м² • эт. {detail.floor} {detail.is_new_building ? "• Новостройка" : ""}
+                </div>
+                <div className="row" style={{marginTop:10}}>
+                  {detail.has_ac && <div className="pill">AC</div>}
+                  {detail.has_wifi && <div className="pill">Wi-Fi</div>}
+                  {detail.has_tv && <div className="pill">TV</div>}
+                  {detail.has_fridge && <div className="pill">Холодильник</div>}
+                  {detail.has_dishwasher && <div className="pill">ПММ</div>}
+                  {detail.has_oven && <div className="pill">Духовка</div>}
+                </div>
+              </div>
+
+              <div className="card">
+                <div style={{fontWeight:600, marginBottom:6}}>Описание</div>
+                <div className="muted">
+                  {detail?.description ? detail.description : "Описание будет добавлено."}
+                </div>
+              </div>
+
+              <div className="card">
+                <div style={{fontWeight:600, marginBottom:6}}>Адрес и локация</div>
+                <div className="muted">{detail.address || "Ереван"}</div>
+                <div className="row" style={{marginTop:8}}>
+                  <button
+                    className="btn"
+                    onClick={() =>
+                      showOnMap({ id: detail.id, lat: detail.lat, lng: detail.lng, title: detail.title })
+                    }
+                  >
+                    Показать на карте
+                  </button>
+                </div>
+              </div>
+
+              <div className="card">
+                <div style={{fontWeight:600, marginBottom:6}}>Контакты</div>
+                <div className="muted">Написать менеджеру (кнопка будет вести в бот)</div>
+                <div className="row" style={{marginTop:8}}>
+                  <button className="btn primary">Написать</button>
+                  <button className="btn">Позвонить</button>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="card">Не удалось загрузить объект</div>
+          )}
+        </div>
+      </div>
+    )}
+  </div>
+);
+}  // ← эта скобка закрывает export default function App() { ... }
