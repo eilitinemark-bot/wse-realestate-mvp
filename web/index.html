@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>White Safe Estate</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+      html, body, #root { height: 100%; margin: 0; }
+      body { font-family: -apple-system, system-ui, Segoe UI, Roboto, Arial, sans-serif; background: #f6f7f9; color:#0f172a; }
+      .app { display: grid; grid-template-columns: 1fr 420px; height: 100%; }
+      @media (max-width: 900px) { .app { grid-template-columns: 1fr; } .side { order:-1; height: 52%; } .mapWrap{ height: 48%; } }
+      .topbar { display:flex; align-items:center; gap:12px; padding:12px 16px; background:#fff; border-bottom:1px solid #e5e7eb; position:sticky; top:0; z-index:10;}
+      .logo { font-weight:700; letter-spacing:.2px; }
+      .mapWrap { position:relative; }
+      #map { width:100%; height: calc(100% - 56px); }
+      .panel { padding:12px; overflow:auto; height: calc(100% - 56px); }
+      .card { background:#fff; border:1px solid #e5e7eb; border-radius:16px; padding:12px; margin-bottom:12px; box-shadow: 0 2px 8px rgba(17,24,39,.04); }
+      .filters { display:grid; grid-template-columns: repeat(2, 1fr); gap:8px; margin-bottom:12px; }
+      .btn { display:inline-flex; align-items:center; justify-content:center; padding:10px 12px; border-radius:10px; border:1px solid #d1d5db; background:#fff; cursor:pointer; }
+      .btn.primary { background:#2563eb; color:#fff; border-color:#2563eb; }
+      .field { display:flex; flex-direction:column; gap:4px; font-size:12px; }
+      .row { display:flex; gap:8px; }
+      .price { font-weight:700; }
+      .pill { background:#f1f5f9; border:1px solid #e2e8f0; padding:2px 8px; border-radius:999px; font-size:12px; }
+      .muted { color:#475569; font-size:12px; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  </body>
+</html>
