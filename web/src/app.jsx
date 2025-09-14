@@ -1283,9 +1283,13 @@ return (
           ) : detail ? (
             <>
               <div className="gallery">
-                <div className="gallery-item">Фото 1 (заглушка)</div>
-                <div className="gallery-item">Фото 2 (заглушка)</div>
-                <div className="gallery-item">Фото 3 (заглушка)</div>
+                {(detail.photos || []).length > 0 ? (
+                  detail.photos.map((url, i) => (
+                    <img key={i} className="gallery-item" src={url} alt="Фото" />
+                  ))
+                ) : (
+                  <div className="gallery-item">нет фото</div>
+                )}
               </div>
 
               <div className="card">
