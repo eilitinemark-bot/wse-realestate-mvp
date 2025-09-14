@@ -1,5 +1,4 @@
 import React, { useEffect, useRef, useState } from "react";
-import ListingFormWizard from "./admin/ListingFormWizard.jsx";
 import AdminPanel from "./admin/AdminPanel.jsx";
 import { useToast } from "./components/Toast.jsx";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -195,7 +194,6 @@ export default function App() {
   const [myListings, setMyListings] = useState([]);
   const [showMy, setShowMy] = useState(false);
   const [apiAlive, setApiAlive] = useState(true);
-  const [showWizard, setShowWizard] = useState(false);
   const [form, setForm] = useState({
     title: "",
     district: "",
@@ -223,9 +221,6 @@ export default function App() {
     photos: [],
   });
 
-  const handleWizardSubmit = (data) => {
-    setForm((s) => ({ ...s, ...data }));
-  };
     const [edit, setEdit] = useState({
       id: "",
       price_amd: "",
@@ -884,12 +879,6 @@ return (
             <input className="btn" value={adminToken} onChange={(e) => setAdminToken(e.target.value)} />
           </div>
 
-          <div className="row" style={{ gap: 8, marginTop: 8 }}>
-            <button className="btn" onClick={() => setShowWizard(true)}>
-              Новый объект (wizard)
-            </button>
-          </div>
-
           <hr style={{ border: "none", borderTop: "1px solid #e5e7eb", margin: "12px 0" }} />
             <hr style={{ border: "none", borderTop: "1px solid #e5e7eb", margin: "12px 0" }} />
           <div className="card" style={{ marginBottom: 16 }}>
@@ -1055,9 +1044,10 @@ return (
           </div>
           </>
         </AdminPanel>
-      )}
+        )}
+      </div>
 
-        {showMy && (
+      {showMy && (
           <div className="card" style={{ marginBottom: 16 }}>
             <div style={{ fontWeight: 700, fontSize: 20, marginBottom: 8 }}>Мои объекты</div>
             {(myListings || []).map((x) => (
@@ -1548,14 +1538,6 @@ return (
       </div>
       </div>
     )}
-
-    {showWizard && (
-      <ListingFormWizard
-        onClose={() => setShowWizard(false)}
-        onSubmit={handleWizardSubmit}
-      />
-    )}
-
     {picking && (
       <div style={{
         position:"fixed", left:0, right:0, bottom:0, display:"flex", justifyContent:"center",
