@@ -1307,6 +1307,17 @@ return (
                   {detail.has_fridge && <div className="pill">Холодильник</div>}
                   {detail.has_dishwasher && <div className="pill">ПММ</div>}
                   {detail.has_oven && <div className="pill">Духовка</div>}
+                  {detail.has_microwave && <div className="pill">Микроволновка</div>}
+                  {detail.is_furnished === true && <div className="pill">Есть мебель</div>}
+                  {detail.is_furnished === false && <div className="pill">Без мебели</div>}
+                  {detail.bath_shower && <div className="pill">Душ</div>}
+                  {detail.bath_tub && <div className="pill">Ванна</div>}
+                  {detail.is_house_yard && <div className="pill">Свой двор</div>}
+                  {detail.house_part && (
+                    <div className="pill">
+                      {detail.house_part === "part" ? "Часть дома" : "Полностью"}
+                    </div>
+                  )}
                 </div>
               </div>
 
