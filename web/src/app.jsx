@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useToast } from "./components/Toast.jsx";
+import { Routes, Route, useLocation, useNavigate } from "react-router-dom";
+import AdminPanel from "./admin/AdminPanel.jsx";
 
 const API = import.meta.env.VITE_PUBLIC_API_BASE || "http://localhost:8000";
 
@@ -49,6 +51,10 @@ function photoUrl(u) {
 
 export default function App() {
   const toast = useToast();
+function Main() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const showAdmin = location.pathname === "/admin";
 // ---------------- base state ----------------
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -183,6 +189,8 @@ export default function App() {
 
   // ---------------- admin ----------------
   const [showAdmin, setShowAdmin] = useState(false);
+  const [adminToken, setAdminToken] = useState("");
+  const [loginToken, setLoginToken] = useState("");
   const [adminToken, setAdminToken] = useState("dev123");
   const [creating, setCreating] = useState(false);
   const [myListings, setMyListings] = useState([]);
@@ -221,6 +229,28 @@ export default function App() {
     });
   const fileInputRef = useRef(null);
   const [picking, setPicking] = useState(false);
+
+  useEffect(() => {
+    if (showAdmin) {
+      const saved = localStorage.getItem("adminToken");
+      if (saved) setAdminToken(saved);
+    }
+  }, [showAdmin]);
+
+  function handleLogin() {
+    if (!loginToken.trim()) {
+      alert("Введите токен");
+      return;
+    }
+    localStorage.setItem("adminToken", loginToken.trim());
+    setAdminToken(loginToken.trim());
+    setLoginToken("");
+  }
+
+  function handleLogout() {
+    localStorage.removeItem("adminToken");
+    setAdminToken("");
+  }
 
   // restore from hash on load / navigate
   useEffect(() => {
@@ -558,7 +588,7 @@ export default function App() {
 
       // обновим список и закроем админку
       setApplied((s) => ({ ...s }));
-      setShowAdmin(false);
+      navigate("/");
     } catch (e) {
       console.error(e);
       toast("Ошибка создания: " + (e.message || e));
@@ -735,7 +765,9 @@ return (
       <div className="topbar">
         <div className="logo">White Safe Estate</div>
         <div className="pill">Yerevan</div>
-        <button className="btn" onClick={() => setShowAdmin(!showAdmin)}>⚙ Админ</button>
+        <button className="btn" onClick={() => navigate(showAdmin ? "/" : "/admin")}>
+          ⚙ Админ
+        </button>
       </div>
       <div id="map" ref={mapRef}></div>
     </div>
@@ -787,17 +819,26 @@ return (
         {/* === АДМИН-ПАНЕЛЬ (перед фильтрами) === */}
         {showAdmin && (
           <div className="card" style={{ marginBottom: 16 }}>
-            <div style={{ fontWeight: 700, fontSize: 20, marginBottom: 8 }}>Админ-панель</div>
+            {!adminToken ? (
+              <>
+                <div style={{ fontWeight: 700, fontSize: 20, marginBottom: 8 }}>Админ вход</div>
+                <div className="field">
+                  <label>Token</label>
+                  <input className="btn" value={loginToken} onChange={(e) => setLoginToken(e.target.value)} />
+                </div>
+                <div className="row" style={{ marginTop: 8 }}>
+                  <button className="btn primary" onClick={handleLogin}>Войти</button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div style={{ fontWeight: 700, fontSize: 20 }}>Админ-панель</div>
+                  <button className="btn" onClick={handleLogout}>Выйти</button>
+                </div>
 
-            <div className="field">
-              <label>Admin Token</label>
-              <input className="btn" value={adminToken} onChange={(e) => setAdminToken(e.target.value)} />
-            </div>
-
-            <hr style={{ border: "none", borderTop: "1px solid #e5e7eb", margin: "12px 0" }} />
-
-            {/* Основные поля */}
-            <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+                {/* Основные поля */}
+                <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
               <input className="btn" placeholder="Заголовок" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} style={{ flex: "1 1 260px" }} />
               <select
                 className="btn"
@@ -937,7 +978,9 @@ return (
               <button className="btn primary" onClick={createListing} disabled={creating}>Создать</button>
               <button className="btn" onClick={loadMyListings}>Мои объекты</button>
             </div>
-          </div>
+          </>
+        )}
+      </div>
         )}
 
         {showMy && (
@@ -958,8 +1001,30 @@ return (
             </div>
           </div>
         )}
+        <div className="panel">
+          {showAdmin && (
+            <AdminPanel
+              adminToken={adminToken}
+              setAdminToken={setAdminToken}
+              form={form}
+              setForm={setForm}
+              DISTRICTS={DISTRICTS}
+              setPicking={setPicking}
+              fileInputRef={fileInputRef}
+              uploadPhotos={uploadPhotos}
+              createListing={createListing}
+              loadMyListings={loadMyListings}
+              showMy={showMy}
+              setShowMy={setShowMy}
+              myListings={myListings}
+              openDetail={openDetail}
+              deleteListing={deleteListing}
+              creating={creating}
+              esc={esc}
+            />
+          )}
 
-        {/* ФИЛЬТРЫ */}
+          {/* ФИЛЬТРЫ */}
         {showFilters && (
           <>
             <div className="filters">
@@ -1425,7 +1490,17 @@ return (
           }}>Отмена</button>
         </div>
       </div>
-    )}
-  </div>
-);
-}  // ← эта скобка закрывает export default function App() { ... }
+      )}
+    </div>
+  );
+}
+
+export default function App() {
+  return (
+    <Routes>
+      <Route path="/admin" element={<Main />} />
+      <Route path="/listing/:id" element={<Main />} />
+      <Route path="/" element={<Main />} />
+    </Routes>
+  );
+}
