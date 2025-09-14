@@ -1,10 +1,5 @@
-import React from 'react';
-import './admin.css';
-
-export default function AdminPanel({ children }) {
-  return <div className="admin-panel">{children}</div>;
-}
 import React from "react";
+import "./admin.css";
 
 export default function AdminPanel({
   adminToken,
@@ -26,7 +21,7 @@ export default function AdminPanel({
   esc,
 }) {
   return (
-    <>
+    <div className="admin-panel">
       <div className="card" style={{ marginBottom: 16 }}>
         <div style={{ fontWeight: 700, fontSize: 20, marginBottom: 8 }}>Админ-панель</div>
 
@@ -295,7 +290,7 @@ export default function AdminPanel({
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 }
 
