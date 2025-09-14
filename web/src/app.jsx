@@ -151,6 +151,9 @@ export default function App() {
     }
   }
 
+// --- numeric helpers: поддержка "40,182008"
+const toNum = (v) => Number(String(v ?? "").replace(",", ".").trim());
+const isNum = (v) => Number.isFinite(toNum(v));
   // ---------------- map ----------------
   const mapRef = useRef(null);
   const leafletMap = useRef(null);
@@ -167,6 +170,7 @@ export default function App() {
   // ---------------- admin ----------------
   const [showAdmin, setShowAdmin] = useState(false);
   const [adminToken, setAdminToken] = useState("dev123");
+  const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({
     title: "",
     district: "",
@@ -185,6 +189,9 @@ export default function App() {
     has_dishwasher: false,
     has_oven: false,
     has_microwave: false,
+bath_shower: false,
+bath_tub: false,
+is_furnished: "",
     is_new_building: false,
     is_house_yard: false,
     house_part: "",
@@ -443,26 +450,42 @@ export default function App() {
   }
 
   async function createListing() {
-    const required = ["title", "district", "price_amd", "bedrooms", "area_sqm", "lat", "lng", "type"];
-    if (form.type === "apartment") required.push("floor");
-    for (const k of required) {
+// если выше ещё нет:
+const [creating, setCreating] = useState(false);
+
+async function createListing() {
+  try {
+    // обязательные поля
+    const must = ["title","district","price_amd","bedrooms","area_sqm","type"];
+    if (form.type === "apartment") must.push("floor");
+    for (const k of must) {
       if (!String(form[k] ?? "").trim()) {
         alert(`Заполните поле: ${k}`);
         return;
       }
     }
 
+    // координаты (поддержка запятой)
+    if (!isNum(form.lat) || !isNum(form.lng)) {
+      alert("Укажите координаты (введите с точкой/запятой или «Выбрать на карте»).");
+      return;
+    }
+
+    setCreating(true);
+
     const payload = {
       title: form.title.trim(),
       district: form.district,
+      price_amd: toNum(form.price_amd),
+      bedrooms: toNum(form.bedrooms),
+      area_sqm: toNum(form.area_sqm),
+      floor: form.type === "apartment" ? toNum(form.floor) : 0,
+      lat: toNum(form.lat),
+      lng: toNum(form.lng),
       type: form.type,
-      price_amd: Number(form.price_amd),
-      bedrooms: Number(form.bedrooms),
-      area_sqm: Number(form.area_sqm),
-      lat: Number(form.lat),
-      lng: Number(form.lng),
-      photos: form.photos || [],
       description: form.description || "",
+
+      // удобства
       has_ac: !!form.has_ac,
       has_wifi: !!form.has_wifi,
       has_tv: !!form.has_tv,
@@ -470,53 +493,44 @@ export default function App() {
       has_dishwasher: !!form.has_dishwasher,
       has_oven: !!form.has_oven,
       has_microwave: !!form.has_microwave,
+
+      // доп. критерии
+      is_furnished: String(form.is_furnished) === "true",
+      bath_shower: !!form.bath_shower,
+      bath_tub: !!form.bath_tub,
+
+      // специфично
+      is_new_building: form.type === "apartment" ? !!form.is_new_building : false,
+      is_house_yard: form.type === "house" ? !!form.is_house_yard : false,
+      house_part: form.type === "house" ? (form.house_part || "") : "",
+
+      photos: form.photos || [],
     };
-    if (form.type === "apartment") {
-      payload.floor = Number(form.floor);
-      payload.is_new_building = !!form.is_new_building;
-    }
-    if (form.type === "house") {
-      payload.is_house_yard = !!form.is_house_yard;
-      if (form.house_part) payload.house_part = form.house_part;
-    }
+
     const res = await fetch(`${API}/api/admin/listings`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Admin-Token": adminToken,
-      },
+      headers: { "Content-Type": "application/json", "X-Admin-Token": adminToken },
       body: JSON.stringify(payload),
     });
-    const data = await res.json();
-    if (!res.ok) {
-      alert("Ошибка: " + (data?.detail || res.statusText));
-      return;
-    }
-    alert("Создано: #" + data.id);
+
+    if (!res.ok) throw new Error(await res.text() || "Ошибка сервера");
+
+    const created = await res.json();
+    alert(`Создано! ID: ${created.id}`);
+
+    // сброс формы
     setForm({
-      title: "",
-      district: "",
-      price_amd: "",
-      bedrooms: "",
-      area_sqm: "",
-      floor: "",
-      lat: "",
-      lng: "",
-      type: "apartment",
-      description: "",
-      has_ac: false,
-      has_wifi: false,
-      has_tv: false,
-      has_fridge: false,
-      has_dishwasher: false,
-      has_oven: false,
-      has_microwave: false,
-      is_new_building: false,
-      is_house_yard: false,
-      house_part: "",
+      title: "", district: "", price_amd: "", bedrooms: "", area_sqm: "",
+      floor: "", lat: "", lng: "", type: "apartment", description: "",
       photos: [],
+      has_ac:false,has_wifi:false,has_tv:false,has_fridge:false,
+      has_dishwasher:false,has_oven:false,has_microwave:false,
+      is_furnished:"", bath_shower:false, bath_tub:false,
+      is_new_building:false, is_house_yard:false, house_part:""
     });
-    // обновим список
+    if (fileInputRef?.current) fileInputRef.current.value = "";
+
+    // обновим список и маркеры; закроем админку
     fetch(`${API}/api/listings`)
       .then((r) => r.json())
       .then((data) => {
@@ -527,6 +541,15 @@ export default function App() {
         setPreview((p) => (p ? sorted.find((x) => x.id === p.id) || p : null));
         setTimeout(() => renderMarkers(sorted), 0);
       });
+
+    setShowAdmin(false);
+  } catch (e) {
+    console.error(e);
+    alert("Ошибка создания: " + (e.message || e));
+  } finally {
+    setCreating(false);
+  }
+}
   }
 
   async function updateListing() {
@@ -752,6 +775,41 @@ return (
               <label className="btn"><input type="checkbox" checked={!!form.has_dishwasher} onChange={e => setForm({ ...form, has_dishwasher: e.target.checked })} />&nbsp;Посудомоечная</label>
               <label className="btn"><input type="checkbox" checked={!!form.has_oven} onChange={e => setForm({ ...form, has_oven: e.target.checked })} />&nbsp;Духовка</label>
               <label className="btn"><input type="checkbox" checked={!!form.has_microwave} onChange={e => setForm({ ...form, has_microwave: e.target.checked })} />&nbsp;Микроволновка</label>
+<label className="btn">
+  <input
+    type="checkbox"
+    checked={!!form.bath_shower}
+    onChange={e => setForm({ ...form, bath_shower: e.target.checked })}
+  />
+  &nbsp;Душ
+</label>
+
+<label className="btn">
+  <input
+    type="checkbox"
+    checked={!!form.bath_tub}
+    onChange={e => setForm({ ...form, bath_tub: e.target.checked })}
+  />
+  &nbsp;Ванна
+</label>
+
+<div className="field" style={{ minWidth: 160 }}>
+  <label>Мебель</label>
+  <select
+    className="btn"
+    value={String(form.is_furnished || "")}
+    onChange={e =>
+      setForm({
+        ...form,
+        is_furnished: e.target.value === "" ? "" : e.target.value === "true",
+      })
+    }
+  >
+    <option value="">Неважно</option>
+    <option value="true">Есть мебель</option>
+    <option value="false">Без мебели</option>
+  </select>
+</div>
             </div>
 
             {/* Дом/Квартира спец-поля */}
@@ -796,7 +854,7 @@ return (
             )}
 
             <div className="row" style={{ gap: 8, marginTop: 12 }}>
-              <button className="btn primary" onClick={createListing}>Создать</button>
+              <button className="btn primary" onClick={createListing} disabled={creating}>Создать</button>
             </div>
           </div>
         )}
