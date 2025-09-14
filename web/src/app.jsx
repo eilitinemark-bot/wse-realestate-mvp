@@ -3,20 +3,26 @@ import React, { useEffect, useRef, useState } from "react";
 const API = import.meta.env.VITE_PUBLIC_API_BASE || "http://localhost:8000";
 
 const DISTRICTS = [
-  "Все районы",
-  "Kentron",
-  "Arabkir",
-  "Ajapnyak",
-  "Avan",
-  "Davtashen",
-  "Erebuni",
-  "Kanaker-Zeytun",
-  "Malatia-Sebastia",
-  "Nor Nork",
-  "Nork-Marash",
-  "Nubarashen",
-  "Shengavit",
+  { value: "", label: "Все районы" },
+  { value: "Kentron", label: "Кентрон" },
+  { value: "Arabkir", label: "Арабкир" },
+  { value: "Ajapnyak", label: "Аджапняк" },
+  { value: "Avan", label: "Аван" },
+  { value: "Davtashen", label: "Давташен" },
+  { value: "Erebuni", label: "Эребуни" },
+  { value: "Kanaker-Zeytun", label: "Канакер-Зейтун" },
+  { value: "Malatia-Sebastia", label: "Малатия-Себастия" },
+  { value: "Nor Nork", label: "Нор Норк" },
+  { value: "Nork-Marash", label: "Норк-Мараш" },
+  { value: "Nubarashen", label: "Нубарашен" },
+  { value: "Shengavit", label: "Шенгавит" },
 ];
+
+const DISTRICT_LABELS = Object.fromEntries(
+  DISTRICTS.map((d) => [d.value, d.label])
+);
+
+const districtLabel = (value) => DISTRICT_LABELS[value] || value;
 
 const esc = (s) =>
   String(s ?? "")
@@ -376,7 +382,7 @@ export default function App() {
   const updateDraft = (patch) => setDraft((s) => ({ ...s, ...patch }));
   function onDistrictsChange(e) {
     const opts = Array.from(e.target.selectedOptions).map((o) => o.value);
-    updateDraft({ districts: opts.filter((d) => d !== "Все районы") });
+    updateDraft({ districts: opts.filter((d) => d !== "") });
   }
 
   function applyDraft() {
@@ -972,7 +978,9 @@ return (
                   style={{ height: 140 }}
                 >
                   {DISTRICTS.map((d) => (
-                    <option key={d} value={d}>{d}</option>
+                    <option key={d.value || "all"} value={d.value}>
+                      {d.label}
+                    </option>
                   ))}
                 </select>
               </div>
@@ -1217,7 +1225,7 @@ return (
               </div>
             </div>
             <div className="muted">
-              {x.district} • {x.bedrooms}-комн • {x.area_sqm} м² • эт. {x.floor}{" "}
+              {districtLabel(x.district)} • {x.bedrooms}-комн • {x.area_sqm} м² • эт. {x.floor}{" "}
               {x.is_new_building ? "• Новостройка" : ""}
               {x.type === "house" ? " • Дом" : ""}
             </div>
@@ -1259,7 +1267,7 @@ return (
             <button className="btn" onClick={() => setPreview(null)}>✕</button>
           </div>
           <div className="muted" style={{marginBottom:8}}>
-            {preview.district} • {preview.bedrooms}-комн • {preview.area_sqm} м² • эт. {preview.floor}
+            {districtLabel(preview.district)} • {preview.bedrooms}-комн • {preview.area_sqm} м² • эт. {preview.floor}
           </div>
           <div className="price" style={{marginBottom:12}}>
             {applied.currency === "USD"
@@ -1313,7 +1321,7 @@ return (
                       ? `$${Math.round(detail.price_usd).toLocaleString()}`
                       : `${Number(detail.price_amd).toLocaleString()} AMD`}
                   </div>
-                  <div className="pill">{detail.district}</div>
+                  <div className="pill">{districtLabel(detail.district)}</div>
                 </div>
                 <div className="muted" style={{marginTop:6}}>
                   {detail.bedrooms}-комн • {detail.area_sqm} м² • эт. {detail.floor} {detail.is_new_building ? "• Новостройка" : ""}
