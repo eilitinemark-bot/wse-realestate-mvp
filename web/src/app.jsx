@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 
 const API = import.meta.env.VITE_PUBLIC_API_BASE || "http://localhost:8000";
+const PING_INTERVAL_MS = 10000;
 
 const DISTRICTS = [
   { value: "", label: "Все районы" },
@@ -185,6 +186,7 @@ export default function App() {
   const [creating, setCreating] = useState(false);
   const [myListings, setMyListings] = useState([]);
   const [showMy, setShowMy] = useState(false);
+  const [apiAlive, setApiAlive] = useState(true);
   const [form, setForm] = useState({
     title: "",
     district: "",
@@ -219,6 +221,27 @@ export default function App() {
     });
   const fileInputRef = useRef(null);
   const [picking, setPicking] = useState(false);
+
+  useEffect(() => {
+    if (!showAdmin) return;
+    let cancelled = false;
+
+    const check = async () => {
+      try {
+        const res = await fetch(`${API}/api/ping`);
+        if (!cancelled) setApiAlive(res.ok);
+      } catch (e) {
+        if (!cancelled) setApiAlive(false);
+      }
+    };
+
+    check();
+    const id = setInterval(check, PING_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [showAdmin]);
 
   // restore from hash on load / navigate
   useEffect(() => {
@@ -767,6 +790,34 @@ return (
         {showAdmin && (
           <div className="card" style={{ marginBottom: 16 }}>
             <div style={{ fontWeight: 700, fontSize: 20, marginBottom: 8 }}>Админ-панель</div>
+
+            <div className="row" style={{ alignItems: "center", gap: 8, marginBottom: 8 }}>
+              <div
+                style={{
+                  width: 10,
+                  height: 10,
+                  borderRadius: "50%",
+                  background: apiAlive ? "#22c55e" : "#ef4444",
+                }}
+              ></div>
+              <div className="muted">
+                {apiAlive ? "Сервер доступен" : "Нет связи с сервером"}
+              </div>
+            </div>
+
+            {!apiAlive && (
+              <div
+                style={{
+                  background: "#fee2e2",
+                  color: "#991b1b",
+                  padding: 8,
+                  borderRadius: 8,
+                  marginBottom: 8,
+                }}
+              >
+                Не удаётся подключиться к API. Проверьте сервер.
+              </div>
+            )}
 
             <div className="field">
               <label>Admin Token</label>
