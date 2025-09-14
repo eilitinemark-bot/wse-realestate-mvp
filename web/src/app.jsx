@@ -1,9 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import ListingFormWizard from "./admin/ListingFormWizard.jsx";
-import AdminPanel from "./admin/AdminPanel";
-import { useToast } from "./components/Toast.jsx";
-import { Routes, Route, useLocation, useNavigate } from "react-router-dom";
 import AdminPanel from "./admin/AdminPanel.jsx";
+import { useToast } from "./components/Toast.jsx";
+import { useLocation, useNavigate } from "react-router-dom";
 
 const API = import.meta.env.VITE_PUBLIC_API_BASE || "http://localhost:8000";
 const PING_INTERVAL_MS = 10000;
@@ -54,7 +53,6 @@ function photoUrl(u) {
 
 export default function App() {
   const toast = useToast();
-function Main() {
   const location = useLocation();
   const navigate = useNavigate();
   const showAdmin = location.pathname === "/admin";
@@ -191,10 +189,8 @@ function Main() {
   const [detailLoading, setDetailLoading] = useState(false);
 
   // ---------------- admin ----------------
-  const [showAdmin, setShowAdmin] = useState(false);
   const [adminToken, setAdminToken] = useState("");
   const [loginToken, setLoginToken] = useState("");
-  const [adminToken, setAdminToken] = useState("dev123");
   const [creating, setCreating] = useState(false);
   const [myListings, setMyListings] = useState([]);
   const [showMy, setShowMy] = useState(false);
@@ -1578,15 +1574,5 @@ return (
       </div>
       )}
     </div>
-  );
-}
-
-export default function App() {
-  return (
-    <Routes>
-      <Route path="/admin" element={<Main />} />
-      <Route path="/listing/:id" element={<Main />} />
-      <Route path="/" element={<Main />} />
-    </Routes>
   );
 }
