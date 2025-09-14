@@ -41,6 +41,7 @@ class Listing(Base):
     type = Column(String, default="apartment", index=True)  # apartment|house
     is_house_yard = Column(Boolean, default=False, index=True)
     house_part = Column(String, default="full")             # full|part
+    description = Column(Text, default="")
     admin_token = Column(String, index=True)
     lat = Column(Float)
     lng = Column(Float)
@@ -98,6 +99,7 @@ class ListingOut(BaseModel):
     type: Literal["apartment","house"]
     is_house_yard: bool
     house_part: str
+    description: str = ""
     lat: float
     lng: float
     price_per_sqm: float
@@ -117,6 +119,7 @@ class ListingIn(BaseModel):
     is_new_building: bool = False
     lat: float
     lng: float
+    description: str = ""
     has_ac: bool = False
     has_oven: bool = False
     has_dishwasher: bool = False
@@ -144,6 +147,7 @@ class ListingUpdate(BaseModel):
     is_new_building: Optional[bool] = None
     lat: Optional[float] = None
     lng: Optional[float] = None
+    description: Optional[str] = None
     has_ac: Optional[bool] = None
     has_oven: Optional[bool] = None
     has_dishwasher: Optional[bool] = None
@@ -278,6 +282,7 @@ def admin_create_listing(payload: ListingIn, request: Request):
 
         item = ListingOut.model_validate(row).model_dump()
         item["photos"] = json.loads(row.photos_json or "[]")
+        item["description"] = row.description or ""
         return item
 
 @app.put("/api/admin/listings/{lid}", response_model=ListingOut)
@@ -305,6 +310,7 @@ def admin_update_listing(lid: int, payload: ListingUpdate, request: Request):
         s.refresh(row)
         item = ListingOut.model_validate(row).model_dump()
         item["photos"] = json.loads(row.photos_json or "[]")
+        item["description"] = row.description or ""
         return item
 
 @app.delete("/api/admin/listings/{lid}")
