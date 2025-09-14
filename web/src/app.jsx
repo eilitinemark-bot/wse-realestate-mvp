@@ -155,9 +155,6 @@ export default function App() {
   const toNum = (v) => Number(String(v ?? "").replace(",", ".").trim());
   const isNum = (v) => Number.isFinite(toNum(v));
 
-// --- numeric helpers: поддержка "40,182008"
-const toNum = (v) => Number(String(v ?? "").replace(",", ".").trim());
-const isNum = (v) => Number.isFinite(toNum(v));
   // ---------------- map ----------------
   const mapRef = useRef(null);
   const leafletMap = useRef(null);
@@ -549,116 +546,6 @@ const isNum = (v) => Number.isFinite(toNum(v));
     } finally {
       setCreating(false);
     }
-// если ещё не объявлено рядом с остальными useState:
-const [creating, setCreating] = useState(false);
-
-async function createListing() {
-  try {
-    // проверка токена админа
-    if (!adminToken.trim()) {
-      alert("Укажите Admin Token");
-      return;
-    }
-
-    // обязательные поля
-    const must = ["title","district","price_amd","bedrooms","area_sqm","type"];
-    if (form.type === "apartment") must.push("floor");
-    for (const k of must) {
-      if (!String(form[k] ?? "").trim()) {
-        alert(`Заполните поле: ${k}`);
-        return;
-      }
-    }
-
-    // координаты (поддержка запятой/точки)
-    if (!isNum(form.lat) || !isNum(form.lng)) {
-      alert("Укажите координаты (введите с точкой/запятой или нажмите «Выбрать на карте»).");
-      return;
-    }
-
-    setCreating(true);
-
-    const payload = {
-      title: form.title.trim(),
-      district: form.district,
-      price_amd: toNum(form.price_amd),
-      bedrooms: toNum(form.bedrooms),
-      area_sqm: toNum(form.area_sqm),
-      floor: form.type === "apartment" ? toNum(form.floor) : 0,
-      lat: toNum(form.lat),
-      lng: toNum(form.lng),
-      type: form.type,
-      description: form.description || "",
-
-      // удобства
-      has_ac: !!form.has_ac,
-      has_wifi: !!form.has_wifi,
-      has_tv: !!form.has_tv,
-      has_fridge: !!form.has_fridge,
-      has_dishwasher: !!form.has_dishwasher,
-      has_oven: !!form.has_oven,
-      has_microwave: !!form.has_microwave,
-
-      // доп. критерии
-      is_furnished: String(form.is_furnished) === "true",
-      bath_shower: !!form.bath_shower,
-      bath_tub: !!form.bath_tub,
-
-      // специфично
-      is_new_building: form.type === "apartment" ? !!form.is_new_building : false,
-      is_house_yard: form.type === "house" ? !!form.is_house_yard : false,
-      house_part: form.type === "house" ? (form.house_part || "") : "",
-
-      photos: form.photos || [],
-    };
-
-    const res = await fetch(`${API}/api/admin/listings`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Admin-Token": adminToken },
-      body: JSON.stringify(payload),
-    });
-
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(text || "Ошибка сервера");
-    }
-
-    const created = await res.json();
-    alert(`Создано! ID: ${created.id}`);
-
-    // сброс формы
-    setForm({
-      title: "", district: "", price_amd: "", bedrooms: "", area_sqm: "",
-      floor: "", lat: "", lng: "", type: "apartment", description: "",
-      photos: [],
-      has_ac:false,has_wifi:false,has_tv:false,has_fridge:false,
-      has_dishwasher:false,has_oven:false,has_microwave:false,
-      is_furnished:"", bath_shower:false, bath_tub:false,
-      is_new_building:false, is_house_yard:false, house_part:""
-    });
-    if (fileInputRef?.current) fileInputRef.current.value = "";
-
-    // обновляем каталог по новой логике: всегда забираем всё и фильтруем/сортируем на клиенте
-    fetch(`${API}/api/listings`)
-      .then((r) => r.json())
-      .then((data) => {
-        const filtered = clientFilter(data, applied);
-        const sorted = clientSort(filtered, sort);
-        setItems(sorted);
-        setTotal(filtered.length);
-        setPreview((p) => (p ? sorted.find((x) => x.id === p.id) || p : null));
-        setTimeout(() => renderMarkers(sorted), 0);
-      });
-
-    // закрываем админку
-    setShowAdmin(false);
-  } catch (e) {
-    console.error(e);
-    alert("Ошибка создания: " + (e.message || e));
-  } finally {
-    setCreating(false);
-  }
-}
   }
 
   async function updateListing() {
