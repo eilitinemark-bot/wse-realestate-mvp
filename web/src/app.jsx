@@ -235,31 +235,32 @@ export default function App() {
   const fileInputRef = useRef(null);
   const [picking, setPicking] = useState(false);
 
-  useEffect(() => {
-    if (!showAdmin) return;
-    let cancelled = false;
+useEffect(() => {
+  if (!showAdmin) return;
+  const saved = localStorage.getItem("adminToken");
+  if (saved) setAdminToken(saved);
+}, [showAdmin]);
 
-    const check = async () => {
-      try {
-        const res = await fetch(`${API}/api/ping`);
-        if (!cancelled) setApiAlive(res.ok);
-      } catch (e) {
-        if (!cancelled) setApiAlive(false);
-      }
-    };
+useEffect(() => {
+  if (!showAdmin) return;
+  let cancelled = false;
 
-    check();
-    const id = setInterval(check, PING_INTERVAL_MS);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, [showAdmin]);
-    if (showAdmin) {
-      const saved = localStorage.getItem("adminToken");
-      if (saved) setAdminToken(saved);
+  const check = async () => {
+    try {
+      const res = await fetch(`${API}/api/ping`);
+      if (!cancelled) setApiAlive(res.ok);
+    } catch {
+      if (!cancelled) setApiAlive(false);
     }
-  }, [showAdmin]);
+  };
+
+  check();
+  const id = setInterval(check, PING_INTERVAL_MS);
+  return () => {
+    cancelled = true;
+    clearInterval(id);
+  };
+}, [showAdmin]);
 
   function handleLogin() {
     if (!loginToken.trim()) {
