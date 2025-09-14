@@ -258,24 +258,24 @@ async def upload_image(file: UploadFile = File(...)):
 @app.post("/api/admin/listings", response_model=ListingOut)
 def admin_create_listing(payload: ListingIn, request: Request):
     token = ensure_admin(request)
-    price_usd = payload.price_usd if payload.price_usd else round(payload.price_amd / USD_RATE, 2)
-    price_per_sqm = round(payload.price_amd / payload.area_sqm, 2)
+
+    # вычисляем производные поля
+    price_usd = payload.price_usd if payload.price_usd is not None else round(payload.price_amd / USD_RATE, 2)
+    price_per_sqm = round(payload.price_amd / payload.area_sqm, 2) if payload.area_sqm else None
+
     with Session(engine) as s:
+        data = payload.model_dump(exclude={"photos", "price_usd", "price_per_sqm"})
         row = Listing(
-            **payload.model_dump(exclude={"photos", "price_usd", "price_per_sqm"}),
+            **data,
             price_usd=price_usd,
             price_per_sqm=price_per_sqm,
             admin_token=token,
             photos_json=json.dumps(payload.photos or []),
         )
-        row = Listing(**payload.model_dump(exclude={"photos"}),
-                      price_usd=price_usd,
-                      price_per_sqm=price_per_sqm,
-                      admin_token=token,
-                      photos_json=json.dumps(payload.photos or []))
         s.add(row)
         s.commit()
         s.refresh(row)
+
         item = ListingOut.model_validate(row).model_dump()
         item["photos"] = json.loads(row.photos_json or "[]")
         return item
