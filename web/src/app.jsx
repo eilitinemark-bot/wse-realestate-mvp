@@ -1069,7 +1069,7 @@ return (
                 </div>
               </div>
             ))}
-            {myListings.length === 0 && <div className="muted">Нет объектов</div>}
+            {(myListings?.length ?? 0) === 0 && <div className="muted">Нет объектов</div>}
             <div className="row" style={{ gap: 8, marginTop: 8 }}>
               <button className="btn" onClick={() => setShowMy(false)}>Закрыть</button>
             </div>
