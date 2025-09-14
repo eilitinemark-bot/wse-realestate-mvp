@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import AdminPanel from "./admin/AdminPanel";
 import { useToast } from "./components/Toast.jsx";
 import { Routes, Route, useLocation, useNavigate } from "react-router-dom";
 import AdminPanel from "./admin/AdminPanel.jsx";
@@ -818,6 +819,16 @@ return (
       <div className="panel">
         {/* === АДМИН-ПАНЕЛЬ (перед фильтрами) === */}
         {showAdmin && (
+          <AdminPanel>
+            <div className="card">
+              <div style={{ fontWeight: 700, fontSize: 20, marginBottom: 8 }}>Админ-панель</div>
+
+            <div className="field">
+              <label>Admin Token</label>
+              <input className="btn" value={adminToken} onChange={(e) => setAdminToken(e.target.value)} />
+            </div>
+
+            <hr style={{ border: "none", borderTop: "1px solid #e5e7eb", margin: "12px 0" }} />
           <div className="card" style={{ marginBottom: 16 }}>
             {!adminToken ? (
               <>
@@ -978,6 +989,8 @@ return (
               <button className="btn primary" onClick={createListing} disabled={creating}>Создать</button>
               <button className="btn" onClick={loadMyListings}>Мои объекты</button>
             </div>
+          </div>
+        </AdminPanel>
           </>
         )}
       </div>
