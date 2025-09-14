@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { Routes, Route, useLocation, useNavigate } from "react-router-dom";
 
 const API = import.meta.env.VITE_PUBLIC_API_BASE || "http://localhost:8000";
 
@@ -46,7 +47,10 @@ function photoUrl(u) {
   return String(u || "").startsWith("http") ? u : `${API}${u}`;
 }
 
-export default function App() {
+function Main() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const showAdmin = location.pathname === "/admin";
 // ---------------- base state ----------------
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -180,7 +184,6 @@ export default function App() {
   const [detailLoading, setDetailLoading] = useState(false);
 
   // ---------------- admin ----------------
-  const [showAdmin, setShowAdmin] = useState(false);
   const [adminToken, setAdminToken] = useState("dev123");
   const [creating, setCreating] = useState(false);
   const [myListings, setMyListings] = useState([]);
@@ -551,7 +554,7 @@ export default function App() {
 
       // обновим список и закроем админку
       setApplied((s) => ({ ...s }));
-      setShowAdmin(false);
+      navigate("/");
     } catch (e) {
       console.error(e);
       alert("Ошибка создания: " + (e.message || e));
@@ -714,7 +717,9 @@ return (
       <div className="topbar">
         <div className="logo">White Safe Estate</div>
         <div className="pill">Yerevan</div>
-        <button className="btn" onClick={() => setShowAdmin(!showAdmin)}>⚙ Админ</button>
+        <button className="btn" onClick={() => navigate(showAdmin ? "/" : "/admin")}>
+          ⚙ Админ
+        </button>
       </div>
       <div id="map" ref={mapRef}></div>
     </div>
@@ -1404,7 +1409,17 @@ return (
           }}>Отмена</button>
         </div>
       </div>
-    )}
-  </div>
-);
-}  // ← эта скобка закрывает export default function App() { ... }
+      )}
+    </div>
+  );
+}
+
+export default function App() {
+  return (
+    <Routes>
+      <Route path="/admin" element={<Main />} />
+      <Route path="/listing/:id" element={<Main />} />
+      <Route path="/" element={<Main />} />
+    </Routes>
+  );
+}
