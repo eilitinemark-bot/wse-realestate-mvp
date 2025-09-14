@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { useToast } from "./components/Toast.jsx";
 
 const API = import.meta.env.VITE_PUBLIC_API_BASE || "http://localhost:8000";
 
@@ -47,6 +48,7 @@ function photoUrl(u) {
 }
 
 export default function App() {
+  const toast = useToast();
 // ---------------- base state ----------------
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -436,19 +438,24 @@ export default function App() {
 
   // ---------- Admin: upload & CRUD ----------
   async function uploadPhoto(file) {
-    const fd = new FormData();
-    fd.append("file", file);
-    const r = await fetch(`${API}/api/upload`, { method: "POST", body: fd });
-    if (!r.ok) throw new Error("Upload failed");
-    const j = await r.json(); // {url:"/uploads/xxx.jpg"}
-    return j.url;
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const r = await fetch(`${API}/api/upload`, { method: "POST", body: fd });
+      if (!r.ok) throw new Error("Upload failed");
+      const j = await r.json(); // {url:"/uploads/xxx.jpg"}
+      return j.url;
+    } catch (e) {
+      console.error(e);
+      throw e;
+    }
   }
 
   async function uploadPhotos() {
     try {
       const files = Array.from(fileInputRef?.current?.files || []).slice(0, 10);
       if (!files.length) {
-        alert("Выберите файлы перед загрузкой");
+        toast("Выберите файлы перед загрузкой");
         return;
       }
       const uploaded = [];
@@ -457,17 +464,17 @@ export default function App() {
       }
       setForm((s) => ({ ...s, photos: [...(s.photos || []), ...uploaded] }));
       if (fileInputRef?.current) fileInputRef.current.value = "";
-      alert("Фото загружено: " + uploaded.join(", "));
+      toast("Фото загружено: " + uploaded.join(", "));
     } catch (e) {
       console.error(e);
-      alert("Ошибка загрузки фото: " + (e.message || e));
+      toast("Ошибка загрузки фото: " + (e.message || e));
     }
   }
 
   async function createListing() {
     try {
       if (!adminToken.trim()) {
-        alert("Укажите Admin Token");
+        toast("Укажите Admin Token");
         return;
       }
       // базовая проверка обязательных полей
@@ -475,14 +482,14 @@ export default function App() {
       if (form.type === "apartment") must.push("floor");
       for (const k of must) {
         if (!String(form[k] ?? "").trim()) {
-          alert(`Заполните поле: ${k}`);
+          toast(`Заполните поле: ${k}`);
           return;
         }
       }
 
       // координаты: либо введены, либо выбраны на карте
       if (!isNum(form.lat) || !isNum(form.lng)) {
-        alert("Укажите координаты (введите с точкой или нажмите «Выбрать на карте»).");
+        toast("Укажите координаты (введите с точкой или нажмите «Выбрать на карте»).");
         return;
       }
 
@@ -535,7 +542,7 @@ export default function App() {
 
       const created = await res.json();
 
-      alert(`Создано! ID: ${created.id}`);
+      toast(`Создано! ID: ${created.id}`);
       setMyListings((s) => [created, ...s]);
       // очистим форму
       setForm({
@@ -554,74 +561,88 @@ export default function App() {
       setShowAdmin(false);
     } catch (e) {
       console.error(e);
-      alert("Ошибка создания: " + (e.message || e));
+      toast("Ошибка создания: " + (e.message || e));
     } finally {
       setCreating(false);
     }
   }
 
     async function updateListing() {
-      if (!edit.id) return alert("Укажи ID для редактирования");
-      const body = {};
-      if (edit.price_amd) body.price_amd = Number(edit.price_amd);
-      if (edit.description) body.description = edit.description;
-      if (edit.addPhotoUrl) body.photos = [(detail?.photos||[])[0], edit.addPhotoUrl].filter(Boolean); // пример: перезапишем список
-      const res = await fetch(`${API}/api/admin/listings/${edit.id}`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Admin-Token": adminToken,
-      },
-      body: JSON.stringify(body),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      alert("Ошибка: " + (data?.detail || res.statusText));
-      return;
+      if (!edit.id) {
+        toast("Укажи ID для редактирования");
+        return;
+      }
+      try {
+        const body = {};
+        if (edit.price_amd) body.price_amd = Number(edit.price_amd);
+        if (edit.description) body.description = edit.description;
+        if (edit.addPhotoUrl)
+          body.photos = [(detail?.photos || [])[0], edit.addPhotoUrl].filter(Boolean);
+        const res = await fetch(`${API}/api/admin/listings/${edit.id}`, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Admin-Token": adminToken,
+          },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          toast("Ошибка: " + (data?.detail || res.statusText));
+          return;
+        }
+        toast("Обновлено");
+        setEdit({ id: "", price_amd: "", addPhotoUrl: "", description: "" });
+        fetch(`${API}/api/listings`)
+          .then((r) => r.json())
+          .then((data) => {
+            const filtered = clientFilter(data, applied);
+            const sorted = clientSort(filtered, sort);
+            setItems(sorted);
+            setTotal(filtered.length);
+            setPreview((p) => (p ? sorted.find((x) => x.id === p.id) || p : null));
+            setTimeout(() => renderMarkers(sorted), 0);
+          });
+      } catch (e) {
+        console.error(e);
+        toast("Ошибка обновления: " + (e.message || e));
+      }
     }
-    alert("Обновлено");
-    setEdit({ id: "", price_amd: "", addPhotoUrl: "", description: "" });
-    fetch(`${API}/api/listings`)
-      .then((r) => r.json())
-      .then((data) => {
-        const filtered = clientFilter(data, applied);
-        const sorted = clientSort(filtered, sort);
-        setItems(sorted);
-        setTotal(filtered.length);
-        setPreview((p) => (p ? sorted.find((x) => x.id === p.id) || p : null));
-        setTimeout(() => renderMarkers(sorted), 0);
-      });
-  }
 
   async function deleteListing(id) {
     if (!window.confirm("Удалить объект #" + id + "?")) return;
-    const res = await fetch(`${API}/api/admin/listings/${id}`, {
-      method: "DELETE",
-      headers: { "X-Admin-Token": adminToken },
-    });
-    if (!res.ok) {
-      const j = await res.json().catch(()=>null);
-      alert("Ошибка: " + (j?.detail || res.statusText));
-      return;
-    }
-    alert("Удалено");
-    setMyListings((s) => s.filter((x) => x.id !== id));
-    fetch(`${API}/api/listings`)
-      .then((r) => r.json())
-      .then((data) => {
-        const filtered = clientFilter(data, applied);
-        const sorted = clientSort(filtered, sort);
-        setItems(sorted);
-        setTotal(filtered.length);
-        setPreview((p) => (p ? sorted.find((x) => x.id === p.id) || p : null));
-        setTimeout(() => renderMarkers(sorted), 0);
+    try {
+      const res = await fetch(`${API}/api/admin/listings/${id}`, {
+        method: "DELETE",
+        headers: { "X-Admin-Token": adminToken },
       });
+      if (!res.ok) {
+        const j = await res.json().catch(() => null);
+        toast("Ошибка: " + (j?.detail || res.statusText));
+        return;
+      }
+      toast("Удалено");
+      setMyListings((s) => s.filter((x) => x.id !== id));
+      fetch(`${API}/api/listings`)
+        .then((r) => r.json())
+        .then((data) => {
+          const filtered = clientFilter(data, applied);
+          const sorted = clientSort(filtered, sort);
+          setItems(sorted);
+          setTotal(filtered.length);
+          setPreview((p) => (p ? sorted.find((x) => x.id === p.id) || p : null));
+          setTimeout(() => renderMarkers(sorted), 0);
+        });
+    } catch (e) {
+      console.error(e);
+      toast("Ошибка удаления: " + (e.message || e));
+    }
   }
 
   async function loadMyListings() {
     try {
       if (!adminToken.trim()) {
-        alert("Укажите Admin Token");
+        toast("Укажите Admin Token");
         return;
       }
       const res = await fetch(`${API}/api/admin/my-listings`, {
@@ -636,7 +657,7 @@ export default function App() {
       setShowMy(true);
     } catch (e) {
       console.error(e);
-      alert("Ошибка загрузки: " + (e.message || e));
+      toast("Ошибка загрузки: " + (e.message || e));
     }
   }
 
