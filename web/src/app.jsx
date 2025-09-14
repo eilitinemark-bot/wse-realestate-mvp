@@ -1,4 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
+import ListingFormWizard from "./admin/ListingFormWizard.jsx";
+import AdminPanel from "./admin/AdminPanel";
+import { useToast } from "./components/Toast.jsx";
+import { Routes, Route, useLocation, useNavigate } from "react-router-dom";
+import AdminPanel from "./admin/AdminPanel.jsx";
 
 const API = import.meta.env.VITE_PUBLIC_API_BASE || "http://localhost:8000";
 const PING_INTERVAL_MS = 10000;
@@ -48,6 +53,11 @@ function photoUrl(u) {
 }
 
 export default function App() {
+  const toast = useToast();
+function Main() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const showAdmin = location.pathname === "/admin";
 // ---------------- base state ----------------
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -182,11 +192,14 @@ export default function App() {
 
   // ---------------- admin ----------------
   const [showAdmin, setShowAdmin] = useState(false);
+  const [adminToken, setAdminToken] = useState("");
+  const [loginToken, setLoginToken] = useState("");
   const [adminToken, setAdminToken] = useState("dev123");
   const [creating, setCreating] = useState(false);
   const [myListings, setMyListings] = useState([]);
   const [showMy, setShowMy] = useState(false);
   const [apiAlive, setApiAlive] = useState(true);
+  const [showWizard, setShowWizard] = useState(false);
   const [form, setForm] = useState({
     title: "",
     district: "",
@@ -213,6 +226,10 @@ export default function App() {
     house_part: "",
     photos: [],
   });
+
+  const handleWizardSubmit = (data) => {
+    setForm((s) => ({ ...s, ...data }));
+  };
     const [edit, setEdit] = useState({
       id: "",
       price_amd: "",
@@ -242,6 +259,26 @@ export default function App() {
       clearInterval(id);
     };
   }, [showAdmin]);
+    if (showAdmin) {
+      const saved = localStorage.getItem("adminToken");
+      if (saved) setAdminToken(saved);
+    }
+  }, [showAdmin]);
+
+  function handleLogin() {
+    if (!loginToken.trim()) {
+      alert("Введите токен");
+      return;
+    }
+    localStorage.setItem("adminToken", loginToken.trim());
+    setAdminToken(loginToken.trim());
+    setLoginToken("");
+  }
+
+  function handleLogout() {
+    localStorage.removeItem("adminToken");
+    setAdminToken("");
+  }
 
   // restore from hash on load / navigate
   useEffect(() => {
@@ -459,19 +496,24 @@ export default function App() {
 
   // ---------- Admin: upload & CRUD ----------
   async function uploadPhoto(file) {
-    const fd = new FormData();
-    fd.append("file", file);
-    const r = await fetch(`${API}/api/upload`, { method: "POST", body: fd });
-    if (!r.ok) throw new Error("Upload failed");
-    const j = await r.json(); // {url:"/uploads/xxx.jpg"}
-    return j.url;
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const r = await fetch(`${API}/api/upload`, { method: "POST", body: fd });
+      if (!r.ok) throw new Error("Upload failed");
+      const j = await r.json(); // {url:"/uploads/xxx.jpg"}
+      return j.url;
+    } catch (e) {
+      console.error(e);
+      throw e;
+    }
   }
 
   async function uploadPhotos() {
     try {
       const files = Array.from(fileInputRef?.current?.files || []).slice(0, 10);
       if (!files.length) {
-        alert("Выберите файлы перед загрузкой");
+        toast("Выберите файлы перед загрузкой");
         return;
       }
       const uploaded = [];
@@ -480,17 +522,17 @@ export default function App() {
       }
       setForm((s) => ({ ...s, photos: [...(s.photos || []), ...uploaded] }));
       if (fileInputRef?.current) fileInputRef.current.value = "";
-      alert("Фото загружено: " + uploaded.join(", "));
+      toast("Фото загружено: " + uploaded.join(", "));
     } catch (e) {
       console.error(e);
-      alert("Ошибка загрузки фото: " + (e.message || e));
+      toast("Ошибка загрузки фото: " + (e.message || e));
     }
   }
 
   async function createListing() {
     try {
       if (!adminToken.trim()) {
-        alert("Укажите Admin Token");
+        toast("Укажите Admin Token");
         return;
       }
       // базовая проверка обязательных полей
@@ -498,14 +540,14 @@ export default function App() {
       if (form.type === "apartment") must.push("floor");
       for (const k of must) {
         if (!String(form[k] ?? "").trim()) {
-          alert(`Заполните поле: ${k}`);
+          toast(`Заполните поле: ${k}`);
           return;
         }
       }
 
       // координаты: либо введены, либо выбраны на карте
       if (!isNum(form.lat) || !isNum(form.lng)) {
-        alert("Укажите координаты (введите с точкой или нажмите «Выбрать на карте»).");
+        toast("Укажите координаты (введите с точкой или нажмите «Выбрать на карте»).");
         return;
       }
 
@@ -558,7 +600,7 @@ export default function App() {
 
       const created = await res.json();
 
-      alert(`Создано! ID: ${created.id}`);
+      toast(`Создано! ID: ${created.id}`);
       setMyListings((s) => [created, ...s]);
       // очистим форму
       setForm({
@@ -574,77 +616,91 @@ export default function App() {
 
       // обновим список и закроем админку
       setApplied((s) => ({ ...s }));
-      setShowAdmin(false);
+      navigate("/");
     } catch (e) {
       console.error(e);
-      alert("Ошибка создания: " + (e.message || e));
+      toast("Ошибка создания: " + (e.message || e));
     } finally {
       setCreating(false);
     }
   }
 
     async function updateListing() {
-      if (!edit.id) return alert("Укажи ID для редактирования");
-      const body = {};
-      if (edit.price_amd) body.price_amd = Number(edit.price_amd);
-      if (edit.description) body.description = edit.description;
-      if (edit.addPhotoUrl) body.photos = [(detail?.photos||[])[0], edit.addPhotoUrl].filter(Boolean); // пример: перезапишем список
-      const res = await fetch(`${API}/api/admin/listings/${edit.id}`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Admin-Token": adminToken,
-      },
-      body: JSON.stringify(body),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      alert("Ошибка: " + (data?.detail || res.statusText));
-      return;
+      if (!edit.id) {
+        toast("Укажи ID для редактирования");
+        return;
+      }
+      try {
+        const body = {};
+        if (edit.price_amd) body.price_amd = Number(edit.price_amd);
+        if (edit.description) body.description = edit.description;
+        if (edit.addPhotoUrl)
+          body.photos = [(detail?.photos || [])[0], edit.addPhotoUrl].filter(Boolean);
+        const res = await fetch(`${API}/api/admin/listings/${edit.id}`, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Admin-Token": adminToken,
+          },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          toast("Ошибка: " + (data?.detail || res.statusText));
+          return;
+        }
+        toast("Обновлено");
+        setEdit({ id: "", price_amd: "", addPhotoUrl: "", description: "" });
+        fetch(`${API}/api/listings`)
+          .then((r) => r.json())
+          .then((data) => {
+            const filtered = clientFilter(data, applied);
+            const sorted = clientSort(filtered, sort);
+            setItems(sorted);
+            setTotal(filtered.length);
+            setPreview((p) => (p ? sorted.find((x) => x.id === p.id) || p : null));
+            setTimeout(() => renderMarkers(sorted), 0);
+          });
+      } catch (e) {
+        console.error(e);
+        toast("Ошибка обновления: " + (e.message || e));
+      }
     }
-    alert("Обновлено");
-    setEdit({ id: "", price_amd: "", addPhotoUrl: "", description: "" });
-    fetch(`${API}/api/listings`)
-      .then((r) => r.json())
-      .then((data) => {
-        const filtered = clientFilter(data, applied);
-        const sorted = clientSort(filtered, sort);
-        setItems(sorted);
-        setTotal(filtered.length);
-        setPreview((p) => (p ? sorted.find((x) => x.id === p.id) || p : null));
-        setTimeout(() => renderMarkers(sorted), 0);
-      });
-  }
 
   async function deleteListing(id) {
     if (!window.confirm("Удалить объект #" + id + "?")) return;
-    const res = await fetch(`${API}/api/admin/listings/${id}`, {
-      method: "DELETE",
-      headers: { "X-Admin-Token": adminToken },
-    });
-    if (!res.ok) {
-      const j = await res.json().catch(()=>null);
-      alert("Ошибка: " + (j?.detail || res.statusText));
-      return;
-    }
-    alert("Удалено");
-    setMyListings((s) => s.filter((x) => x.id !== id));
-    fetch(`${API}/api/listings`)
-      .then((r) => r.json())
-      .then((data) => {
-        const filtered = clientFilter(data, applied);
-        const sorted = clientSort(filtered, sort);
-        setItems(sorted);
-        setTotal(filtered.length);
-        setPreview((p) => (p ? sorted.find((x) => x.id === p.id) || p : null));
-        setTimeout(() => renderMarkers(sorted), 0);
+    try {
+      const res = await fetch(`${API}/api/admin/listings/${id}`, {
+        method: "DELETE",
+        headers: { "X-Admin-Token": adminToken },
       });
+      if (!res.ok) {
+        const j = await res.json().catch(() => null);
+        toast("Ошибка: " + (j?.detail || res.statusText));
+        return;
+      }
+      toast("Удалено");
+      setMyListings((s) => s.filter((x) => x.id !== id));
+      fetch(`${API}/api/listings`)
+        .then((r) => r.json())
+        .then((data) => {
+          const filtered = clientFilter(data, applied);
+          const sorted = clientSort(filtered, sort);
+          setItems(sorted);
+          setTotal(filtered.length);
+          setPreview((p) => (p ? sorted.find((x) => x.id === p.id) || p : null));
+          setTimeout(() => renderMarkers(sorted), 0);
+        });
+    } catch (e) {
+      console.error(e);
+      toast("Ошибка удаления: " + (e.message || e));
+    }
   }
 
   async function loadMyListings() {
     try {
       if (!adminToken.trim()) {
-        alert("Укажите Admin Token");
+        toast("Укажите Admin Token");
         return;
       }
       const res = await fetch(`${API}/api/admin/my-listings`, {
@@ -659,7 +715,7 @@ export default function App() {
       setShowMy(true);
     } catch (e) {
       console.error(e);
-      alert("Ошибка загрузки: " + (e.message || e));
+      toast("Ошибка загрузки: " + (e.message || e));
     }
   }
 
@@ -737,7 +793,9 @@ return (
       <div className="topbar">
         <div className="logo">White Safe Estate</div>
         <div className="pill">Yerevan</div>
-        <button className="btn" onClick={() => setShowAdmin(!showAdmin)}>⚙ Админ</button>
+        <button className="btn" onClick={() => navigate(showAdmin ? "/" : "/admin")}>
+          ⚙ Админ
+        </button>
       </div>
       <div id="map" ref={mapRef}></div>
     </div>
@@ -788,8 +846,9 @@ return (
       <div className="panel">
         {/* === АДМИН-ПАНЕЛЬ (перед фильтрами) === */}
         {showAdmin && (
-          <div className="card" style={{ marginBottom: 16 }}>
-            <div style={{ fontWeight: 700, fontSize: 20, marginBottom: 8 }}>Админ-панель</div>
+          <AdminPanel>
+            <div className="card">
+              <div style={{ fontWeight: 700, fontSize: 20, marginBottom: 8 }}>Админ-панель</div>
 
             <div className="row" style={{ alignItems: "center", gap: 8, marginBottom: 8 }}>
               <div
@@ -823,11 +882,40 @@ return (
               <label>Admin Token</label>
               <input className="btn" value={adminToken} onChange={(e) => setAdminToken(e.target.value)} />
             </div>
+          <div className="field">
+            <label>Admin Token</label>
+            <input className="btn" value={adminToken} onChange={(e) => setAdminToken(e.target.value)} />
+          </div>
 
+          <div className="row" style={{ gap: 8, marginTop: 8 }}>
+            <button className="btn" onClick={() => setShowWizard(true)}>
+              Новый объект (wizard)
+            </button>
+          </div>
+
+          <hr style={{ border: "none", borderTop: "1px solid #e5e7eb", margin: "12px 0" }} />
             <hr style={{ border: "none", borderTop: "1px solid #e5e7eb", margin: "12px 0" }} />
+          <div className="card" style={{ marginBottom: 16 }}>
+            {!adminToken ? (
+              <>
+                <div style={{ fontWeight: 700, fontSize: 20, marginBottom: 8 }}>Админ вход</div>
+                <div className="field">
+                  <label>Token</label>
+                  <input className="btn" value={loginToken} onChange={(e) => setLoginToken(e.target.value)} />
+                </div>
+                <div className="row" style={{ marginTop: 8 }}>
+                  <button className="btn primary" onClick={handleLogin}>Войти</button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div style={{ fontWeight: 700, fontSize: 20 }}>Админ-панель</div>
+                  <button className="btn" onClick={handleLogout}>Выйти</button>
+                </div>
 
-            {/* Основные поля */}
-            <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+                {/* Основные поля */}
+                <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
               <input className="btn" placeholder="Заголовок" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} style={{ flex: "1 1 260px" }} />
               <select
                 className="btn"
@@ -968,6 +1056,10 @@ return (
               <button className="btn" onClick={loadMyListings}>Мои объекты</button>
             </div>
           </div>
+        </AdminPanel>
+          </>
+        )}
+      </div>
         )}
 
         {showMy && (
@@ -988,8 +1080,30 @@ return (
             </div>
           </div>
         )}
+        <div className="panel">
+          {showAdmin && (
+            <AdminPanel
+              adminToken={adminToken}
+              setAdminToken={setAdminToken}
+              form={form}
+              setForm={setForm}
+              DISTRICTS={DISTRICTS}
+              setPicking={setPicking}
+              fileInputRef={fileInputRef}
+              uploadPhotos={uploadPhotos}
+              createListing={createListing}
+              loadMyListings={loadMyListings}
+              showMy={showMy}
+              setShowMy={setShowMy}
+              myListings={myListings}
+              openDetail={openDetail}
+              deleteListing={deleteListing}
+              creating={creating}
+              esc={esc}
+            />
+          )}
 
-        {/* ФИЛЬТРЫ */}
+          {/* ФИЛЬТРЫ */}
         {showFilters && (
           <>
             <div className="filters">
@@ -1440,6 +1554,13 @@ return (
       </div>
     )}
 
+    {showWizard && (
+      <ListingFormWizard
+        onClose={() => setShowWizard(false)}
+        onSubmit={handleWizardSubmit}
+      />
+    )}
+
     {picking && (
       <div style={{
         position:"fixed", left:0, right:0, bottom:0, display:"flex", justifyContent:"center",
@@ -1455,7 +1576,17 @@ return (
           }}>Отмена</button>
         </div>
       </div>
-    )}
-  </div>
-);
-}  // ← эта скобка закрывает export default function App() { ... }
+      )}
+    </div>
+  );
+}
+
+export default function App() {
+  return (
+    <Routes>
+      <Route path="/admin" element={<Main />} />
+      <Route path="/listing/:id" element={<Main />} />
+      <Route path="/" element={<Main />} />
+    </Routes>
+  );
+}
