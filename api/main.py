@@ -6,6 +6,8 @@ from typing import List, Optional, Literal
 from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime, Text
 from sqlalchemy.orm import declarative_base, Session
 from sqlalchemy.sql import func
+from logging.handlers import RotatingFileHandler
+import logging
 import os, json
 
 # === config ===
@@ -164,6 +166,23 @@ class ListingUpdate(BaseModel):
 
 app = FastAPI(title="WSE API", version="0.1.0")
 
+# --- logging ---
+os.makedirs("logs", exist_ok=True)
+admin_logger = logging.getLogger("admin")
+if not admin_logger.handlers:
+    admin_logger.setLevel(logging.INFO)
+    handler = RotatingFileHandler("logs/admin.log", maxBytes=1_000_000, backupCount=5)
+    formatter = logging.Formatter("%(asctime)s %(message)s")
+    handler.setFormatter(formatter)
+    admin_logger.addHandler(handler)
+
+@app.middleware("http")
+async def admin_logging(request: Request, call_next):
+    if request.url.path.startswith("/api/admin/"):
+        token = request.headers.get("X-Admin-Token")
+        admin_logger.info("%s %s token=%s", request.method, request.url.path, token or "None")
+    return await call_next(request)
+
 # --- статика и CORS ---
 os.makedirs("uploads", exist_ok=True)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
@@ -176,7 +195,11 @@ app.add_middleware(
 # --- admin helper ---
 def ensure_admin(request: Request) -> str:
     token = request.headers.get("X-Admin-Token")
-    if not token or token not in ADMIN_TOKENS:
+    if not token:
+        admin_logger.warning("%s %s - missing token", request.method, request.url.path)
+        raise HTTPException(401, "Unauthorized")
+    if token not in ADMIN_TOKENS:
+        admin_logger.warning("%s %s - invalid token %s", request.method, request.url.path, token)
         raise HTTPException(401, "Unauthorized")
     return token
 
