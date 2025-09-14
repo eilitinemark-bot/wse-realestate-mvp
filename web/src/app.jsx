@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import AdminPanel from "./admin/AdminPanel";
 
 const API = import.meta.env.VITE_PUBLIC_API_BASE || "http://localhost:8000";
 
@@ -765,8 +766,9 @@ return (
       <div className="panel">
         {/* === АДМИН-ПАНЕЛЬ (перед фильтрами) === */}
         {showAdmin && (
-          <div className="card" style={{ marginBottom: 16 }}>
-            <div style={{ fontWeight: 700, fontSize: 20, marginBottom: 8 }}>Админ-панель</div>
+          <AdminPanel>
+            <div className="card">
+              <div style={{ fontWeight: 700, fontSize: 20, marginBottom: 8 }}>Админ-панель</div>
 
             <div className="field">
               <label>Admin Token</label>
@@ -917,6 +919,7 @@ return (
               <button className="btn" onClick={loadMyListings}>Мои объекты</button>
             </div>
           </div>
+        </AdminPanel>
         )}
 
         {showMy && (
