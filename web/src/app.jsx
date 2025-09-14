@@ -171,6 +171,8 @@ const isNum = (v) => Number.isFinite(toNum(v));
   const [showAdmin, setShowAdmin] = useState(false);
   const [adminToken, setAdminToken] = useState("dev123");
   const [creating, setCreating] = useState(false);
+  const [myListings, setMyListings] = useState([]);
+  const [showMy, setShowMy] = useState(false);
   const [form, setForm] = useState({
     title: "",
     district: "",
@@ -189,9 +191,9 @@ const isNum = (v) => Number.isFinite(toNum(v));
     has_dishwasher: false,
     has_oven: false,
     has_microwave: false,
-bath_shower: false,
-bath_tub: false,
-is_furnished: "",
+    bath_shower: false,
+    bath_tub: false,
+    is_furnished: "",
     is_new_building: false,
     is_house_yard: false,
     house_part: "",
@@ -450,11 +452,17 @@ is_furnished: "",
   }
 
   async function createListing() {
-// если выше ещё нет:
+// если ещё не объявлено рядом с остальными useState:
 const [creating, setCreating] = useState(false);
 
 async function createListing() {
   try {
+    // проверка токена админа
+    if (!adminToken.trim()) {
+      alert("Укажите Admin Token");
+      return;
+    }
+
     // обязательные поля
     const must = ["title","district","price_amd","bedrooms","area_sqm","type"];
     if (form.type === "apartment") must.push("floor");
@@ -465,9 +473,9 @@ async function createListing() {
       }
     }
 
-    // координаты (поддержка запятой)
+    // координаты (поддержка запятой/точки)
     if (!isNum(form.lat) || !isNum(form.lng)) {
-      alert("Укажите координаты (введите с точкой/запятой или «Выбрать на карте»).");
+      alert("Укажите координаты (введите с точкой/запятой или нажмите «Выбрать на карте»).");
       return;
     }
 
@@ -513,7 +521,10 @@ async function createListing() {
       body: JSON.stringify(payload),
     });
 
-    if (!res.ok) throw new Error(await res.text() || "Ошибка сервера");
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text || "Ошибка сервера");
+    }
 
     const created = await res.json();
     alert(`Создано! ID: ${created.id}`);
@@ -530,7 +541,7 @@ async function createListing() {
     });
     if (fileInputRef?.current) fileInputRef.current.value = "";
 
-    // обновим список и маркеры; закроем админку
+    // обновляем каталог по новой логике: всегда забираем всё и фильтруем/сортируем на клиенте
     fetch(`${API}/api/listings`)
       .then((r) => r.json())
       .then((data) => {
@@ -542,6 +553,7 @@ async function createListing() {
         setTimeout(() => renderMarkers(sorted), 0);
       });
 
+    // закрываем админку
     setShowAdmin(false);
   } catch (e) {
     console.error(e);
@@ -596,6 +608,7 @@ async function createListing() {
       return;
     }
     alert("Удалено");
+    setMyListings((s) => s.filter((x) => x.id !== id));
     fetch(`${API}/api/listings`)
       .then((r) => r.json())
       .then((data) => {
@@ -606,6 +619,28 @@ async function createListing() {
         setPreview((p) => (p ? sorted.find((x) => x.id === p.id) || p : null));
         setTimeout(() => renderMarkers(sorted), 0);
       });
+  }
+
+  async function loadMyListings() {
+    try {
+      if (!adminToken.trim()) {
+        alert("Укажите Admin Token");
+        return;
+      }
+      const res = await fetch(`${API}/api/admin/my-listings`, {
+        headers: { "X-Admin-Token": adminToken },
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || "Ошибка сервера");
+      }
+      const data = await res.json();
+      setMyListings(data);
+      setShowMy(true);
+    } catch (e) {
+      console.error(e);
+      alert("Ошибка загрузки: " + (e.message || e));
+    }
   }
 
 // ---------------- styles ----------------
@@ -775,6 +810,19 @@ return (
               <label className="btn"><input type="checkbox" checked={!!form.has_dishwasher} onChange={e => setForm({ ...form, has_dishwasher: e.target.checked })} />&nbsp;Посудомоечная</label>
               <label className="btn"><input type="checkbox" checked={!!form.has_oven} onChange={e => setForm({ ...form, has_oven: e.target.checked })} />&nbsp;Духовка</label>
               <label className="btn"><input type="checkbox" checked={!!form.has_microwave} onChange={e => setForm({ ...form, has_microwave: e.target.checked })} />&nbsp;Микроволновка</label>
+              <label className="btn"><input type="checkbox" checked={!!form.bath_shower}
+                onChange={e => setForm({ ...form, bath_shower: e.target.checked })} />&nbsp;Душ</label>
+              <label className="btn"><input type="checkbox" checked={!!form.bath_tub}
+                onChange={e => setForm({ ...form, bath_tub: e.target.checked })} />&nbsp;Ванна</label>
+              <div className="field" style={{minWidth:160}}>
+                <label>Мебель</label>
+                <select className="btn" value={String(form.is_furnished || "")}
+                        onChange={e => setForm({ ...form, is_furnished: e.target.value === "" ? "" : e.target.value === "true" })}>
+                  <option value="">Неважно</option>
+                  <option value="true">Есть мебель</option>
+                  <option value="false">Без мебели</option>
+                </select>
+              </div>
 <label className="btn">
   <input
     type="checkbox"
@@ -855,6 +903,26 @@ return (
 
             <div className="row" style={{ gap: 8, marginTop: 12 }}>
               <button className="btn primary" onClick={createListing} disabled={creating}>Создать</button>
+              <button className="btn" onClick={loadMyListings}>Мои объекты</button>
+            </div>
+          </div>
+        )}
+
+        {showMy && (
+          <div className="card" style={{ marginBottom: 16 }}>
+            <div style={{ fontWeight: 700, fontSize: 20, marginBottom: 8 }}>Мои объекты</div>
+            {(myListings || []).map((x) => (
+              <div key={x.id} className="row" style={{ justifyContent: "space-between", marginBottom: 4 }}>
+                <div>#{x.id} {esc(x.title)}</div>
+                <div className="row" style={{ gap: 4 }}>
+                  <button className="btn" onClick={() => openDetail(x.id)}>Открыть</button>
+                  <button className="btn" onClick={() => deleteListing(x.id)}>Удалить</button>
+                </div>
+              </div>
+            ))}
+            {myListings.length === 0 && <div className="muted">Нет объектов</div>}
+            <div className="row" style={{ gap: 8, marginTop: 8 }}>
+              <button className="btn" onClick={() => setShowMy(false)}>Закрыть</button>
             </div>
           </div>
         )}
