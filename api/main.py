@@ -218,14 +218,6 @@ def search(
         for i, r in enumerate(rows):
             out[i]["photos"] = json.loads(r.photos_json or "[]")
         return out
-    with Session(engine) as s:
-        q = s.query(Listing)
-        # фильтры как у тебя
-        rows = q.order_by(Listing.created_at.desc()).all()
-        out = [ListingOut.model_validate(r).model_dump() for r in rows]
-        for i, r in enumerate(rows):
-            out[i]["photos"] = json.loads(r.photos_json or "[]")
-        return out
 
 # --- детальная карточка ---
 @app.get("/api/listings/{lid}", response_model=ListingOut)
