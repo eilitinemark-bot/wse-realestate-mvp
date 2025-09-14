@@ -268,6 +268,11 @@ def admin_create_listing(payload: ListingIn, request: Request):
             admin_token=token,
             photos_json=json.dumps(payload.photos or []),
         )
+        row = Listing(**payload.model_dump(exclude={"photos"}),
+                      price_usd=price_usd,
+                      price_per_sqm=price_per_sqm,
+                      admin_token=token,
+                      photos_json=json.dumps(payload.photos or []))
         s.add(row)
         s.commit()
         s.refresh(row)
