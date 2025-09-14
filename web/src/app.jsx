@@ -42,6 +42,10 @@ function pluralRu(n) {
   return "ов";
 }
 
+function photoUrl(u) {
+  return String(u || "").startsWith("http") ? u : `${API}${u}`;
+}
+
 export default function App() {
 // ---------------- base state ----------------
   const [items, setItems] = useState([]);
@@ -1307,7 +1311,7 @@ return (
               <div className="gallery">
                 {(detail.photos || []).length > 0 ? (
                   detail.photos.map((url, i) => (
-                    <img key={i} className="gallery-item" src={url} alt="Фото" />
+                    <img key={i} className="gallery-item" src={photoUrl(url)} alt="Фото" />
                   ))
                 ) : (
                   <div className="gallery-item">нет фото</div>
