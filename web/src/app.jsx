@@ -1053,11 +1053,9 @@ return (
               <button className="btn" onClick={loadMyListings}>Мои объекты</button>
             </div>
           </div>
-        </AdminPanel>
           </>
-        )}
-      </div>
-        )}
+        </AdminPanel>
+      )}
 
         {showMy && (
           <div className="card" style={{ marginBottom: 16 }}>
