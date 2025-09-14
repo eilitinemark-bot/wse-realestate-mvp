@@ -154,10 +154,6 @@ export default function App() {
   // --- numeric helpers: поддержка "40,182008"
   const toNum = (v) => Number(String(v ?? "").replace(",", ".").trim());
   const isNum = (v) => Number.isFinite(toNum(v));
-
-// --- numeric helpers: поддержка "40,182008"
-const toNum = (v) => Number(String(v ?? "").replace(",", ".").trim());
-const isNum = (v) => Number.isFinite(toNum(v));
   // ---------------- map ----------------
   const mapRef = useRef(null);
   const leafletMap = useRef(null);
