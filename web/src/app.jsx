@@ -155,6 +155,7 @@ export default function App() {
   const toNum = (v) => Number(String(v ?? "").replace(",", ".").trim());
   const isNum = (v) => Number.isFinite(toNum(v));
 
+    // ---------------- map ----------------
   // ---------------- map ----------------
   const mapRef = useRef(null);
   const leafletMap = useRef(null);
@@ -200,11 +201,12 @@ export default function App() {
     house_part: "",
     photos: [],
   });
-  const [edit, setEdit] = useState({
-    id: "",
-    price_amd: "",
-    addPhotoUrl: "",
-  });
+    const [edit, setEdit] = useState({
+      id: "",
+      price_amd: "",
+      addPhotoUrl: "",
+      description: "",
+    });
   const fileInputRef = useRef(null);
   const [picking, setPicking] = useState(false);
 
@@ -548,16 +550,17 @@ export default function App() {
     }
   }
 
-  async function updateListing() {
-    if (!edit.id) return alert("Укажи ID для редактирования");
-    const body = {};
-    if (edit.price_amd) body.price_amd = Number(edit.price_amd);
-    if (edit.addPhotoUrl) body.photos = [(detail?.photos||[])[0], edit.addPhotoUrl].filter(Boolean); // пример: перезапишем список
-    const res = await fetch(`${API}/api/admin/listings/${edit.id}`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Admin-Token": adminToken,
+    async function updateListing() {
+      if (!edit.id) return alert("Укажи ID для редактирования");
+      const body = {};
+      if (edit.price_amd) body.price_amd = Number(edit.price_amd);
+      if (edit.description) body.description = edit.description;
+      if (edit.addPhotoUrl) body.photos = [(detail?.photos||[])[0], edit.addPhotoUrl].filter(Boolean); // пример: перезапишем список
+      const res = await fetch(`${API}/api/admin/listings/${edit.id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Admin-Token": adminToken,
       },
       body: JSON.stringify(body),
     });
@@ -567,7 +570,7 @@ export default function App() {
       return;
     }
     alert("Обновлено");
-    setEdit({ id: "", price_amd: "", addPhotoUrl: "" });
+    setEdit({ id: "", price_amd: "", addPhotoUrl: "", description: "" });
     fetch(`${API}/api/listings`)
       .then((r) => r.json())
       .then((data) => {
