@@ -6,6 +6,7 @@ import { Routes, Route, useLocation, useNavigate } from "react-router-dom";
 import AdminPanel from "./admin/AdminPanel.jsx";
 
 const API = import.meta.env.VITE_PUBLIC_API_BASE || "http://localhost:8000";
+const PING_INTERVAL_MS = 10000;
 
 const DISTRICTS = [
   { value: "", label: "Все районы" },
@@ -197,6 +198,7 @@ function Main() {
   const [creating, setCreating] = useState(false);
   const [myListings, setMyListings] = useState([]);
   const [showMy, setShowMy] = useState(false);
+  const [apiAlive, setApiAlive] = useState(true);
   const [showWizard, setShowWizard] = useState(false);
   const [form, setForm] = useState({
     title: "",
@@ -238,6 +240,25 @@ function Main() {
   const [picking, setPicking] = useState(false);
 
   useEffect(() => {
+    if (!showAdmin) return;
+    let cancelled = false;
+
+    const check = async () => {
+      try {
+        const res = await fetch(`${API}/api/ping`);
+        if (!cancelled) setApiAlive(res.ok);
+      } catch (e) {
+        if (!cancelled) setApiAlive(false);
+      }
+    };
+
+    check();
+    const id = setInterval(check, PING_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [showAdmin]);
     if (showAdmin) {
       const saved = localStorage.getItem("adminToken");
       if (saved) setAdminToken(saved);
@@ -829,6 +850,38 @@ return (
             <div className="card">
               <div style={{ fontWeight: 700, fontSize: 20, marginBottom: 8 }}>Админ-панель</div>
 
+            <div className="row" style={{ alignItems: "center", gap: 8, marginBottom: 8 }}>
+              <div
+                style={{
+                  width: 10,
+                  height: 10,
+                  borderRadius: "50%",
+                  background: apiAlive ? "#22c55e" : "#ef4444",
+                }}
+              ></div>
+              <div className="muted">
+                {apiAlive ? "Сервер доступен" : "Нет связи с сервером"}
+              </div>
+            </div>
+
+            {!apiAlive && (
+              <div
+                style={{
+                  background: "#fee2e2",
+                  color: "#991b1b",
+                  padding: 8,
+                  borderRadius: 8,
+                  marginBottom: 8,
+                }}
+              >
+                Не удаётся подключиться к API. Проверьте сервер.
+              </div>
+            )}
+
+            <div className="field">
+              <label>Admin Token</label>
+              <input className="btn" value={adminToken} onChange={(e) => setAdminToken(e.target.value)} />
+            </div>
           <div className="field">
             <label>Admin Token</label>
             <input className="btn" value={adminToken} onChange={(e) => setAdminToken(e.target.value)} />
