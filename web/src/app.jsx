@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 
 const API = import.meta.env.VITE_PUBLIC_API_BASE || "http://localhost:8000";
 
@@ -80,11 +80,87 @@ export default function App() {
   const [previewCount, setPreviewCount] = useState(null);
   const previewTimer = useRef(null);
 
+  // --- NEW: клиентская фильтрация + сортировка (чтобы работало даже если бэк не фильтрует)
+  function clientFilter(list, f) {
+    return list.filter((x) => {
+      if (f.type && x.type !== f.type) return false;
+
+      if (Array.isArray(f.districts) && f.districts.length && !f.districts.includes(x.district)) {
+        return false;
+      }
+
+      // Цена: учитываем валюту UI
+      const price = f.currency === "USD" ? Number(x.price_usd) : Number(x.price_amd);
+      if (String(f.priceFrom).trim() !== "" && price < Number(f.priceFrom)) return false;
+      if (String(f.priceTo).trim()   !== "" && price > Number(f.priceTo))   return false;
+
+      // Комнаты
+      if (String(f.bedrooms).trim() !== "") {
+        const want = Number(f.bedrooms);
+        if (want === 3) {
+          if (Number(x.bedrooms) < 3) return false;
+        } else {
+          if (Number(x.bedrooms) !== want) return false;
+        }
+      }
+
+      // Площадь
+      if (String(f.areaFrom).trim() !== "" && Number(x.area_sqm) < Number(f.areaFrom)) return false;
+      if (String(f.areaTo).trim()   !== "" && Number(x.area_sqm) > Number(f.areaTo))   return false;
+
+      // Этаж (для квартир)
+      if (x.type === "apartment") {
+        if (String(f.floorFrom).trim() !== "" && Number(x.floor) < Number(f.floorFrom)) return false;
+        if (String(f.floorTo).trim()   !== "" && Number(x.floor) > Number(f.floorTo))   return false;
+        if (String(f.isNew).trim() !== "" && Boolean(x.is_new_building) !== (f.isNew === true)) return false;
+      }
+
+      // Цена за м²
+      const pps = Number(x.price_amd) / Math.max(1, Number(x.area_sqm));
+      if (String(f.ppsFrom).trim() !== "" && pps < Number(f.ppsFrom)) return false;
+      if (String(f.ppsTo).trim()   !== "" && pps > Number(f.ppsTo))   return false;
+
+      // Удобства (в бэке snake_case)
+      if (f.hasAC && !x.has_ac) return false;
+      if (f.hasOven && !x.has_oven) return false;
+      if (f.hasDishwasher && !x.has_dishwasher) return false;
+      if (f.hasTV && !x.has_tv) return false;
+      if (f.hasWiFi && !x.has_wifi) return false;
+      if (f.hasMicrowave && !x.has_microwave) return false;
+      if (f.hasFridge && !x.has_fridge) return false;
+
+      // Дом-специфика
+      if (x.type === "house") {
+        if (String(f.isHouseYard).trim() !== "" && Boolean(x.is_house_yard) !== (f.isHouseYard === true)) return false;
+        if (String(f.housePart).trim() !== "" && String(x.house_part || "") !== String(f.housePart)) return false;
+      }
+
+      return true;
+    });
+  }
+
+  function clientSort(list, sort) {
+    const a = [...list];
+    switch (sort) {
+      case "price_asc":  return a.sort((x, y) => x.price_amd - y.price_amd);
+      case "price_desc": return a.sort((x, y) => y.price_amd - x.price_amd);
+      case "area_asc":   return a.sort((x, y) => x.area_sqm - y.area_sqm);
+      case "area_desc":  return a.sort((x, y) => y.area_sqm - x.area_sqm);
+      case "newest":
+      default:           return a.sort((x, y) => Number(y.id) - Number(x.id));
+    }
+  }
+
+  // --- numeric helpers: поддержка "40,182008"
+  const toNum = (v) => Number(String(v ?? "").replace(",", ".").trim());
+  const isNum = (v) => Number.isFinite(toNum(v));
+
   // ---------------- map ----------------
   const mapRef = useRef(null);
   const leafletMap = useRef(null);
   const markers = useRef([]);
   const markerById = useRef(new Map());
+  const tempMarkerRef = useRef(null);
 
   // ---------------- preview & detail ----------------
   const [preview, setPreview] = useState(null); // объект для «предпросмотра»
@@ -95,6 +171,7 @@ export default function App() {
   // ---------------- admin ----------------
   const [showAdmin, setShowAdmin] = useState(false);
   const [adminToken, setAdminToken] = useState("dev123");
+  const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({
     title: "",
     district: "",
@@ -105,6 +182,20 @@ export default function App() {
     lat: "",
     lng: "",
     type: "apartment",
+    description: "",
+    has_ac: false,
+    has_wifi: false,
+    has_tv: false,
+    has_fridge: false,
+    has_dishwasher: false,
+    has_oven: false,
+    has_microwave: false,
+    bath_shower: false,
+    bath_tub: false,
+    is_furnished: "",
+    is_new_building: false,
+    is_house_yard: false,
+    house_part: "",
     photos: [],
   });
   const [edit, setEdit] = useState({
@@ -113,6 +204,7 @@ export default function App() {
     addPhotoUrl: "",
   });
   const fileInputRef = useRef(null);
+  const [picking, setPicking] = useState(false);
 
   // restore from hash on load / navigate
   useEffect(() => {
@@ -150,171 +242,31 @@ export default function App() {
       });
   }, [detailId]);
 
-  // ===== ADMIN HELPERS =====
-  function updForm(patch) {
-    setForm((f) => ({ ...f, ...patch }));
-  }
-
-  async function uploadPhoto() {
-    try {
-      const file = fileInputRef?.current?.files?.[0];
-      if (!file) {
-        alert("Выберите файл перед загрузкой");
-        return;
-      }
-      const fd = new FormData();
-      fd.append("file", file);
-
-      const res = await fetch(`${API}/api/upload`, { method: "POST", body: fd });
-      if (!res.ok) throw new Error(await res.text());
-
-      const j = await res.json(); // { url: "/uploads/..." }
-      setForm((f) => ({ ...f, photos: [ ...(f.photos || []), j.url ] }));
-
-      if (fileInputRef?.current) fileInputRef.current.value = "";
-      alert("Фото загружено: " + j.url);
-    } catch (e) {
-      console.error(e);
-      alert("Ошибка загрузки фото: " + (e.message || e));
-    }
-  }
-
-  async function createListing() {
-    try {
-      const required = ["title","district","price_amd","bedrooms","area_sqm","floor","lat","lng","type"];
-      for (const k of required) {
-        if (!String(form[k] ?? "").trim()) {
-          alert(`Заполните поле: ${k}`);
-          return;
-        }
-      }
-
-      const payload = {
-        title: form.title.trim(),
-        district: form.district,
-        price_amd: Number(form.price_amd),
-        bedrooms: Number(form.bedrooms),
-        area_sqm: Number(form.area_sqm),
-        floor: Number(form.floor),
-        lat: Number(form.lat),
-        lng: Number(form.lng),
-        type: form.type,
-        photos: form.photos || [],
-      };
-
-      const res = await fetch(`${API}/api/admin/listings`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Admin-Token": adminToken,
-        },
-        body: JSON.stringify(payload),
-      });
-
-      if (!res.ok) throw new Error(await res.text());
-
-      const created = await res.json();
-      alert("Создано! ID: " + created.id);
-
-      setForm({
-        title: "",
-        district: "",
-        price_amd: "",
-        bedrooms: "",
-        area_sqm: "",
-        floor: "",
-        lat: "",
-        lng: "",
-        type: "apartment",
-        photos: [],
-      });
-      if (fileInputRef?.current) fileInputRef.current.value = "";
-
-      setApplied((s) => ({ ...s }));
-    } catch (e) {
-      console.error(e);
-      alert("Ошибка создания: " + (e.message || e));
-    }
-  }
-
-  // -------- helpers for filters --------
-  const buildParams = (state) => {
-    const p = new URLSearchParams();
-    (state.districts || []).forEach((d) => {
-      if (d && d !== "Все районы") p.append("districts", d);
-    });
-    if (state.priceFrom) p.set("price_from", state.priceFrom);
-    if (state.priceTo) p.set("price_to", state.priceTo);
-    if (state.currency) p.set("currency", state.currency);
-    if (state.bedrooms !== "") p.set("bedrooms", state.bedrooms);
-    if (state.areaFrom) p.set("area_from", state.areaFrom);
-    if (state.areaTo) p.set("area_to", state.areaTo);
-    if (state.floorFrom) p.set("floor_from", state.floorFrom);
-    if (state.floorTo) p.set("floor_to", state.floorTo);
-    if (state.isNew !== "") p.set("is_new_building", state.isNew);
-    if (state.ppsFrom) p.set("price_per_sqm_from", state.ppsFrom);
-    if (state.ppsTo) p.set("price_per_sqm_to", state.ppsTo);
-    if (state.hasAC) p.set("has_ac", "true");
-    if (state.hasOven) p.set("has_oven", "true");
-    if (state.hasDishwasher) p.set("has_dishwasher", "true");
-    if (state.hasTV) p.set("has_tv", "true");
-    if (state.hasWiFi) p.set("has_wifi", "true");
-    if (state.hasMicrowave) p.set("has_microwave", "true");
-    if (state.hasFridge) p.set("has_fridge", "true");
-    if (state.isFurnished !== "") p.set("is_furnished", state.isFurnished);
-    if (state.bathShower) p.set("bath_shower", "true");
-    if (state.bathTub) p.set("bath_tub", "true");
-    if (state.type) p.set("type", state.type);
-    if (state.isHouseYard !== "") p.set("is_house_yard", state.isHouseYard);
-    if (state.housePart) p.set("house_part", state.housePart);
-    return p.toString();
-  };
-
-  const appliedQuery = useMemo(() => buildParams(applied), [applied]);
-
-  // fetch списка
+  // --- ОБНОВЛЁННАЯ загрузка списка: всегда тянем все и фильтруем клиентом
   useEffect(() => {
+    let aborted = false;
     setLoading(true);
-    fetch(`${API}/api/listings?${appliedQuery}`)
+    fetch(`${API}/api/listings`)
       .then((r) => r.json())
-      .then((d) => {
-        let arr = [...d];
-        switch (sort) {
-          case "price_asc":
-            arr.sort((a, b) =>
-              (applied.currency === "USD" ? a.price_usd : a.price_amd) -
-              (applied.currency === "USD" ? b.price_usd : b.price_amd)
-            );
-            break;
-          case "price_desc":
-            arr.sort((a, b) =>
-              (applied.currency === "USD" ? b.price_usd : b.price_amd) -
-              (applied.currency === "USD" ? a.price_usd : a.price_amd)
-            );
-            break;
-          case "area_asc":
-            arr.sort((a, b) => a.area_sqm - b.area_sqm);
-            break;
-          case "area_desc":
-            arr.sort((a, b) => b.area_sqm - a.area_sqm);
-            break;
-          case "newest":
-          default:
-            break;
-        }
-        setItems(arr);
-        setTotal(arr.length || 0);
-        setLoading(false);
-        setPreview((p) => (p ? arr.find((x) => x.id === p.id) || p : null));
-        setTimeout(() => renderMarkers(arr), 0);
+      .then((data) => {
+        if (aborted) return;
+        const filtered = clientFilter(data, applied);
+        const sorted = clientSort(filtered, sort);
+        setItems(sorted);
+        setTotal(filtered.length);
+        setPreview((p) => (p ? sorted.find((x) => x.id === p.id) || p : null));
+        setTimeout(() => renderMarkers(sorted), 0);
       })
       .catch(() => {
-        setItems([]);
-        setTotal(0);
-        setLoading(false);
-        renderMarkers([]);
-      });
-  }, [appliedQuery, sort, applied.currency]);
+        if (!aborted) {
+          setItems([]);
+          setTotal(0);
+          renderMarkers([]);
+        }
+      })
+      .finally(() => !aborted && setLoading(false));
+    return () => { aborted = true; };
+  }, [JSON.stringify(applied), sort]);
 
   // карта
   useEffect(() => {
@@ -382,15 +334,35 @@ export default function App() {
     } catch {}
   }
 
+  // выбор координат кликом по карте
+  useEffect(() => {
+    if (!picking || !leafletMap.current) return;
+    const handler = (e) => {
+      setForm((f) => ({ ...f, lat: e.latlng.lat.toFixed(6), lng: e.latlng.lng.toFixed(6) }));
+      if (tempMarkerRef.current) {
+        tempMarkerRef.current.setLatLng(e.latlng);
+      } else {
+        // eslint-disable-next-line no-undef
+        tempMarkerRef.current = L.marker(e.latlng, { zIndexOffset: 1000 }).addTo(leafletMap.current);
+      }
+    };
+    leafletMap.current.on("click", handler);
+    return () => {
+      leafletMap.current.off("click", handler);
+    };
+  }, [picking]);
+
   // предпросчёт количества для кнопки «Показать N объектов»
   useEffect(() => {
     if (!showFilters) return;
     if (previewTimer.current) clearTimeout(previewTimer.current);
     previewTimer.current = setTimeout(() => {
-      const q = buildParams(draft);
-      fetch(`${API}/api/listings?${q}`)
+      fetch(`${API}/api/listings`)
         .then((r) => r.json())
-        .then((d) => setPreviewCount(d.length || 0))
+        .then((data) => {
+          const filtered = clientFilter(data, draft);
+          setPreviewCount(filtered.length || 0);
+        })
         .catch(() => setPreviewCount(null));
     }, 250);
     return () => previewTimer.current && clearTimeout(previewTimer.current);
@@ -398,14 +370,20 @@ export default function App() {
 
   // handlers
   const updateDraft = (patch) => setDraft((s) => ({ ...s, ...patch }));
-  const onDistrictsChange = (e) => {
-    const arr = Array.from(e.target.selectedOptions).map((o) => o.value);
-    if (arr.includes("Все районы")) updateDraft({ districts: [] });
-    else updateDraft({ districts: arr });
-  };
-  const resetDraft = () =>
-    setDraft({
-      ...draft,
+  function onDistrictsChange(e) {
+    const opts = Array.from(e.target.selectedOptions).map((o) => o.value);
+    updateDraft({ districts: opts.filter((d) => d !== "Все районы") });
+  }
+
+  function applyDraft() {
+    setApplied({ ...draft });
+    setShowFilters(false);
+    setPreviewCount(null);
+  }
+
+  function resetDraft() {
+    const base = {
+      currency: "AMD",
       districts: [],
       priceFrom: "",
       priceTo: "",
@@ -427,14 +405,12 @@ export default function App() {
       isFurnished: "",
       bathShower: false,
       bathTub: false,
-      type: "",
+      type: "",          // "", "apartment", "house"
       isHouseYard: "",
       housePart: "",
-    });
-  const applyDraft = () => {
-    setApplied(draft);
-    setShowFilters(false);
-  };
+    };
+    setDraft(base);
+  }
 
   // open/close detail
   const openDetail = (id) => {
@@ -454,46 +430,115 @@ export default function App() {
     return j.url;
   }
 
-  async function createListing() {
-    const payload = {
-      ...form,
-      price_amd: Number(form.price_amd),
-      bedrooms: Number(form.bedrooms),
-      area_sqm: Number(form.area_sqm),
-      floor: Number(form.floor),
-      lat: Number(form.lat),
-      lng: Number(form.lng),
-      photos: form.photos || [],
-    };
-    const res = await fetch(`${API}/api/admin/listings`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Admin-Token": adminToken,
-      },
-      body: JSON.stringify(payload),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      alert("Ошибка: " + (data?.detail || res.statusText));
-      return;
+  async function uploadPhotos() {
+    try {
+      const files = Array.from(fileInputRef?.current?.files || []).slice(0, 10);
+      if (!files.length) {
+        alert("Выберите файлы перед загрузкой");
+        return;
+      }
+      const uploaded = [];
+      for (const f of files) {
+        uploaded.push(await uploadPhoto(f));
+      }
+      setForm((s) => ({ ...s, photos: [...(s.photos || []), ...uploaded] }));
+      if (fileInputRef?.current) fileInputRef.current.value = "";
+      alert("Фото загружено: " + uploaded.join(", "));
+    } catch (e) {
+      console.error(e);
+      alert("Ошибка загрузки фото: " + (e.message || e));
     }
-    alert("Создано: #" + data.id);
-    setForm({
-      title: "",
-      district: "",
-      price_amd: "",
-      bedrooms: "",
-      area_sqm: "",
-      floor: "",
-      lat: "",
-      lng: "",
-      type: "apartment",
-      photos: [],
-    });
-    // обновим список
-    const q = buildParams(applied);
-    fetch(`${API}/api/listings?${q}`).then(r=>r.json()).then(setItems);
+  }
+
+  async function createListing() {
+    try {
+      // базовая проверка обязательных полей
+      const must = ["title","district","price_amd","bedrooms","area_sqm","type"];
+      if (form.type === "apartment") must.push("floor");
+      for (const k of must) {
+        if (!String(form[k] ?? "").trim()) {
+          alert(`Заполните поле: ${k}`);
+          return;
+        }
+      }
+
+      // координаты: либо введены, либо выбраны на карте
+      if (!isNum(form.lat) || !isNum(form.lng)) {
+        alert("Укажите координаты (введите с точкой или нажмите «Выбрать на карте»).");
+        return;
+      }
+
+      setCreating(true);
+
+      const payload = {
+        title: form.title.trim(),
+        district: form.district,
+        price_amd: toNum(form.price_amd),
+        bedrooms: toNum(form.bedrooms),
+        area_sqm: toNum(form.area_sqm),
+        floor: form.type === "apartment" ? toNum(form.floor) : 0,
+        lat: toNum(form.lat),
+        lng: toNum(form.lng),
+        type: form.type,
+        description: form.description || "",
+
+        // удобства (snake_case как в бэке)
+        has_ac: !!form.has_ac,
+        has_wifi: !!form.has_wifi,
+        has_tv: !!form.has_tv,
+        has_fridge: !!form.has_fridge,
+        has_dishwasher: !!form.has_dishwasher,
+        has_oven: !!form.has_oven,
+        has_microwave: !!form.has_microwave,
+
+        // доп. критерии
+        is_furnished: String(form.is_furnished) === "true",
+        bath_shower: !!form.bath_shower,
+        bath_tub: !!form.bath_tub,
+
+        // специфично
+        is_new_building: form.type === "apartment" ? !!form.is_new_building : false,
+        is_house_yard: form.type === "house" ? !!form.is_house_yard : false,
+        house_part: form.type === "house" ? (form.house_part || "") : "",
+
+        photos: form.photos || [],
+      };
+
+      const res = await fetch(`${API}/api/admin/listings`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Admin-Token": adminToken },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || "Ошибка сервера");
+      }
+
+      const created = await res.json();
+
+      alert(`Создано! ID: ${created.id}`);
+      // очистим форму
+      setForm({
+        title: "", district: "", price_amd: "", bedrooms: "", area_sqm: "",
+        floor: "", lat: "", lng: "", type: "apartment", description: "",
+        photos: [],
+        has_ac:false,has_wifi:false,has_tv:false,has_fridge:false,
+        has_dishwasher:false,has_oven:false,has_microwave:false,
+        is_furnished:"", bath_shower:false, bath_tub:false,
+        is_new_building:false, is_house_yard:false, house_part:""
+      });
+      if (fileInputRef?.current) fileInputRef.current.value = "";
+
+      // обновим список и закроем админку
+      setApplied((s) => ({ ...s }));
+      setShowAdmin(false);
+    } catch (e) {
+      console.error(e);
+      alert("Ошибка создания: " + (e.message || e));
+    } finally {
+      setCreating(false);
+    }
   }
 
   async function updateListing() {
@@ -516,8 +561,16 @@ export default function App() {
     }
     alert("Обновлено");
     setEdit({ id: "", price_amd: "", addPhotoUrl: "" });
-    const q = buildParams(applied);
-    fetch(`${API}/api/listings?${q}`).then(r=>r.json()).then(setItems);
+    fetch(`${API}/api/listings`)
+      .then((r) => r.json())
+      .then((data) => {
+        const filtered = clientFilter(data, applied);
+        const sorted = clientSort(filtered, sort);
+        setItems(sorted);
+        setTotal(filtered.length);
+        setPreview((p) => (p ? sorted.find((x) => x.id === p.id) || p : null));
+        setTimeout(() => renderMarkers(sorted), 0);
+      });
   }
 
   async function deleteListing(id) {
@@ -532,8 +585,16 @@ export default function App() {
       return;
     }
     alert("Удалено");
-    const q = buildParams(applied);
-    fetch(`${API}/api/listings?${q}`).then(r=>r.json()).then(setItems);
+    fetch(`${API}/api/listings`)
+      .then((r) => r.json())
+      .then((data) => {
+        const filtered = clientFilter(data, applied);
+        const sorted = clientSort(filtered, sort);
+        setItems(sorted);
+        setTotal(filtered.length);
+        setPreview((p) => (p ? sorted.find((x) => x.id === p.id) || p : null));
+        setTimeout(() => renderMarkers(sorted), 0);
+      });
   }
 
 // ---------------- styles ----------------
@@ -671,56 +732,96 @@ return (
 
             <hr style={{ border: "none", borderTop: "1px solid #e5e7eb", margin: "12px 0" }} />
 
-            <div style={{ fontWeight: 600, marginBottom: 8 }}>Создать объект</div>
-
+            {/* Основные поля */}
             <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-              <input className="btn" placeholder="title" value={form.title}
-                     onChange={(e) => updForm({ title: e.target.value })} style={{ flex: "1 1 260px" }} />
-              <input className="btn" placeholder="district (Kentron/Arabkir/...)" value={form.district}
-                     onChange={(e) => updForm({ district: e.target.value })} style={{ flex: "1 1 200px" }} />
-            </div>
-
-            <div className="row" style={{ gap: 8, marginTop: 8 }}>
-              <input className="btn" placeholder="price_amd" type="number" value={form.price_amd}
-                     onChange={(e) => updForm({ price_amd: e.target.value })} style={{ flex: "1 1 160px" }} />
-              <input className="btn" placeholder="bedrooms" type="number" value={form.bedrooms}
-                     onChange={(e) => updForm({ bedrooms: e.target.value })} style={{ flex: "1 1 120px" }} />
-            </div>
-
-            <div className="row" style={{ gap: 8, marginTop: 8 }}>
-              <input className="btn" placeholder="area_sqm" type="number" value={form.area_sqm}
-                     onChange={(e) => updForm({ area_sqm: e.target.value })} style={{ flex: "1 1 120px" }} />
-              <input className="btn" placeholder="floor" type="number" value={form.floor}
-                     onChange={(e) => updForm({ floor: e.target.value })} style={{ flex: "1 1 120px" }} />
-            </div>
-
-            <div className="row" style={{ gap: 8, marginTop: 8 }}>
-              <input className="btn" placeholder="lat" type="number" step="0.000001" value={form.lat}
-                     onChange={(e) => updForm({ lat: e.target.value })} style={{ flex: "1 1 160px" }} />
-              <input className="btn" placeholder="lng" type="number" step="0.000001" value={form.lng}
-                     onChange={(e) => updForm({ lng: e.target.value })} style={{ flex: "1 1 160px" }} />
-            </div>
-
-            <div className="row" style={{ gap: 8, marginTop: 8 }}>
-              <select className="btn" value={form.type} onChange={(e) => updForm({ type: e.target.value })}>
-                <option value="apartment">apartment</option>
-                <option value="house">house</option>
+              <input className="btn" placeholder="Заголовок" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} style={{ flex: "1 1 260px" }} />
+              <input className="btn" placeholder="Район (Kentron/...)" value={form.district} onChange={(e) => setForm({ ...form, district: e.target.value })} style={{ flex: "1 1 200px" }} />
+              <select className="btn" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
+                <option value="apartment">Квартира</option>
+                <option value="house">Дом</option>
               </select>
             </div>
 
-            <div className="row" style={{ gap: 8, marginTop: 12 }}>
-              <input ref={fileInputRef} className="btn" type="file" accept="image/*" />
-              <button className="btn" onClick={uploadPhoto}>Загрузить фото</button>
+            <div className="row" style={{ gap: 8, marginTop: 8 }}>
+              <input className="btn" placeholder="Цена AMD" type="number" value={form.price_amd} onChange={(e) => setForm({ ...form, price_amd: e.target.value })} />
+              <input className="btn" placeholder="Спальни" type="number" value={form.bedrooms} onChange={(e) => setForm({ ...form, bedrooms: e.target.value })} />
+              <input className="btn" placeholder="Площадь м²" type="number" value={form.area_sqm} onChange={(e) => setForm({ ...form, area_sqm: e.target.value })} />
+              <input className="btn" placeholder="Этаж" type="number" value={form.floor} onChange={(e) => setForm({ ...form, floor: e.target.value })} disabled={form.type === "house"} />
             </div>
 
+            {/* Описание */}
+            <div className="field" style={{ marginTop: 8 }}>
+              <label>Описание</label>
+              <textarea className="btn" rows={3} placeholder="Краткое описание" value={form.description || ""} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+            </div>
+
+            {/* Удобства */}
+            <div className="row" style={{ flexWrap: "wrap", marginTop: 8 }}>
+              <label className="btn"><input type="checkbox" checked={!!form.has_ac} onChange={e => setForm({ ...form, has_ac: e.target.checked })} />&nbsp;Кондиционер</label>
+              <label className="btn"><input type="checkbox" checked={!!form.has_wifi} onChange={e => setForm({ ...form, has_wifi: e.target.checked })} />&nbsp;Wi-Fi</label>
+              <label className="btn"><input type="checkbox" checked={!!form.has_tv} onChange={e => setForm({ ...form, has_tv: e.target.checked })} />&nbsp;TV</label>
+              <label className="btn"><input type="checkbox" checked={!!form.has_fridge} onChange={e => setForm({ ...form, has_fridge: e.target.checked })} />&nbsp;Холодильник</label>
+              <label className="btn"><input type="checkbox" checked={!!form.has_dishwasher} onChange={e => setForm({ ...form, has_dishwasher: e.target.checked })} />&nbsp;Посудомоечная</label>
+              <label className="btn"><input type="checkbox" checked={!!form.has_oven} onChange={e => setForm({ ...form, has_oven: e.target.checked })} />&nbsp;Духовка</label>
+              <label className="btn"><input type="checkbox" checked={!!form.has_microwave} onChange={e => setForm({ ...form, has_microwave: e.target.checked })} />&nbsp;Микроволновка</label>
+              <label className="btn"><input type="checkbox" checked={!!form.bath_shower}
+                onChange={e => setForm({ ...form, bath_shower: e.target.checked })} />&nbsp;Душ</label>
+              <label className="btn"><input type="checkbox" checked={!!form.bath_tub}
+                onChange={e => setForm({ ...form, bath_tub: e.target.checked })} />&nbsp;Ванна</label>
+              <div className="field" style={{minWidth:160}}>
+                <label>Мебель</label>
+                <select className="btn" value={String(form.is_furnished || "")}
+                        onChange={e => setForm({ ...form, is_furnished: e.target.value === "" ? "" : e.target.value === "true" })}>
+                  <option value="">Неважно</option>
+                  <option value="true">Есть мебель</option>
+                  <option value="false">Без мебели</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Дом/Квартира спец-поля */}
+            {form.type === "apartment" && (
+              <div className="row" style={{ gap: 8, marginTop: 8 }}>
+                <label className="btn">
+                  <input type="checkbox" checked={String(form.is_new_building) === "true"} onChange={e => setForm({ ...form, is_new_building: e.target.checked })} />
+                  &nbsp;Новостройка
+                </label>
+              </div>
+            )}
+            {form.type === "house" && (
+              <div className="row" style={{ gap: 8, marginTop: 8 }}>
+                <label className="btn">
+                  <input type="checkbox" checked={String(form.is_house_yard) === "true"} onChange={e => setForm({ ...form, is_house_yard: e.target.checked })} />
+                  &nbsp;Свой двор
+                </label>
+                <select className="btn" value={form.house_part || ""} onChange={(e) => setForm({ ...form, house_part: e.target.value })}>
+                  <option value="">Дом полностью/часть</option>
+                  <option value="full">Полностью</option>
+                  <option value="part">Часть дома</option>
+                </select>
+              </div>
+            )}
+
+            {/* Координаты: выбрать на карте */}
+            <div className="row" style={{ gap: 8, marginTop: 8 }}>
+              <input className="btn" placeholder="lat" type="number" step="0.000001" value={form.lat} onChange={(e) => setForm({ ...form, lat: e.target.value })} />
+              <input className="btn" placeholder="lng" type="number" step="0.000001" value={form.lng} onChange={(e) => setForm({ ...form, lng: e.target.value })} />
+              <button className="btn" onClick={() => setPicking(true)}>Выбрать на карте</button>
+            </div>
+
+            {/* Фото: массовая загрузка до 10 */}
+            <div className="row" style={{ gap: 8, marginTop: 12, alignItems: "center" }}>
+              <input ref={fileInputRef} className="btn" type="file" accept="image/*" multiple />
+              <button className="btn" onClick={uploadPhotos}>Загрузить фото (до 10)</button>
+            </div>
             {(form.photos || []).length > 0 && (
               <div className="muted" style={{ marginTop: 8 }}>
-                Фото: {(form.photos || []).map((u) => <div key={u}>{u}</div>)}
+                Фото ({(form.photos || []).length}): {(form.photos || []).map((u) => <div key={u}>{u}</div>)}
               </div>
             )}
 
             <div className="row" style={{ gap: 8, marginTop: 12 }}>
-              <button className="btn primary" onClick={createListing}>Создать</button>
+              <button className="btn primary" onClick={createListing} disabled={creating}>Создать</button>
             </div>
           </div>
         )}
@@ -729,7 +830,35 @@ return (
         {showFilters && (
           <>
             <div className="filters">
-              {/* DISTRICTS */}
+              {/* TYPE SELECTOR — первый шаг */}
+              <div className="field col2">
+                <label>Тип</label>
+                <div className="row">
+                  <button
+                    className="btn"
+                    onClick={() => updateDraft({ type: "" })}
+                    aria-pressed={draft.type === "" ? "true" : "false"}
+                  >
+                    Квартира/Дом (не важно)
+                  </button>
+                  <button
+                    className="btn"
+                    onClick={() => updateDraft({ type: "apartment" })}
+                    aria-pressed={draft.type === "apartment" ? "true" : "false"}
+                  >
+                    Квартира
+                  </button>
+                  <button
+                    className="btn"
+                    onClick={() => updateDraft({ type: "house" })}
+                    aria-pressed={draft.type === "house" ? "true" : "false"}
+                  >
+                    Дом
+                  </button>
+                </div>
+              </div>
+
+              {/* DISTRICTS — второй шаг */}
               <div className="field col2">
                 <label>Районы</label>
                 <select
@@ -746,7 +875,7 @@ return (
                 </select>
               </div>
 
-              {/* PRICE */}
+              {/* GENERAL PRICE */}
               <div className="field">
                 <label>Цена {applied.currency === "USD" ? "($)" : "(AMD)"} — от</label>
                 <input
@@ -777,9 +906,7 @@ return (
                   className="btn"
                   value={String(draft.bedrooms)}
                   onChange={(e) =>
-                    updateDraft({
-                      bedrooms: e.target.value === "" ? "" : Number(e.target.value),
-                    })
+                    updateDraft({ bedrooms: e.target.value === "" ? "" : Number(e.target.value) })
                   }
                 >
                   <option value="">Любые</option>
@@ -790,7 +917,7 @@ return (
                 </select>
               </div>
 
-              {/* AREA */}
+              {/* Площадь */}
               <div className="field">
                 <label>Площадь (м²) — от</label>
                 <input
@@ -814,46 +941,49 @@ return (
                 />
               </div>
 
-              {/* FLOOR */}
-              <div className="field">
-                <label>Этаж — от</label>
-                <input
-                  className="btn"
-                  type="number"
-                  value={draft.floorFrom}
-                  onChange={(e) => updateDraft({ floorFrom: e.target.value })}
-                  placeholder="от"
-                />
-              </div>
-              <div className="field">
-                <label>Этаж — до</label>
-                <input
-                  className="btn"
-                  type="number"
-                  value={draft.floorTo}
-                  onChange={(e) => updateDraft({ floorTo: e.target.value })}
-                  placeholder="до"
-                />
-              </div>
+              {/* СПЕЦИФИКА ДЛЯ КВАРТИР */}
+              {(draft.type === "" || draft.type === "apartment") && (
+                <>
+                  <div className="field">
+                    <label>Этаж — от</label>
+                    <input
+                      className="btn"
+                      type="number"
+                      value={draft.floorFrom}
+                      onChange={(e) => updateDraft({ floorFrom: e.target.value })}
+                      placeholder="от"
+                    />
+                  </div>
+                  <div className="field">
+                    <label>Этаж — до</label>
+                    <input
+                      className="btn"
+                      type="number"
+                      value={draft.floorTo}
+                      onChange={(e) => updateDraft({ floorTo: e.target.value })}
+                      placeholder="до"
+                    />
+                  </div>
 
-              {/* NEW */}
-              <div className="field">
-                <label>Новостройка</label>
-                <select
-                  className="btn"
-                  value={String(draft.isNew)}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    updateDraft({ isNew: v === "" ? "" : v === "true" });
-                  }}
-                >
-                  <option value="">Не важно</option>
-                  <option value="true">Да</option>
-                  <option value="false">Нет</option>
-                </select>
-              </div>
+                  <div className="field">
+                    <label>Новостройка</label>
+                    <select
+                      className="btn"
+                      value={String(draft.isNew)}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        updateDraft({ isNew: v === "" ? "" : v === "true" });
+                      }}
+                    >
+                      <option value="">Не важно</option>
+                      <option value="true">Да</option>
+                      <option value="false">Нет</option>
+                    </select>
+                  </div>
+                </>
+              )}
 
-              {/* PPS */}
+              {/* Цена за м² */}
               <div className="field">
                 <label>Цена за м² — от</label>
                 <input
@@ -877,141 +1007,69 @@ return (
                 />
               </div>
 
-              {/* Furniture */}
-              <div className="field">
-                <label>Мебель</label>
-                <select
-                  className="btn"
-                  value={String(draft.isFurnished)}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    updateDraft({ isFurnished: v === "" ? "" : v === "true" });
-                  }}
-                >
-                  <option value="">Неважно</option>
-                  <option value="true">Меблирована</option>
-                  <option value="false">Без мебели</option>
-                </select>
-              </div>
-
-              {/* Bathroom */}
+              {/* Удобства */}
               <label className="btn">
-                <input
-                  type="checkbox"
-                  checked={draft.bathShower}
-                  onChange={(e) => updateDraft({ bathShower: e.target.checked })}
-                />
-                &nbsp;Душ
-              </label>
-              <label className="btn">
-                <input
-                  type="checkbox"
-                  checked={draft.bathTub}
-                  onChange={(e) => updateDraft({ bathTub: e.target.checked })}
-                />
-                &nbsp;Ванна
-              </label>
-
-              {/* Appliances */}
-              <label className="btn">
-                <input
-                  type="checkbox"
-                  checked={draft.hasAC}
-                  onChange={(e) => updateDraft({ hasAC: e.target.checked })}
-                />
+                <input type="checkbox" checked={draft.hasAC} onChange={(e) => updateDraft({ hasAC: e.target.checked })} />
                 &nbsp;Кондиционер
               </label>
               <label className="btn">
-                <input
-                  type="checkbox"
-                  checked={draft.hasOven}
-                  onChange={(e) => updateDraft({ hasOven: e.target.checked })}
-                />
+                <input type="checkbox" checked={draft.hasOven} onChange={(e) => updateDraft({ hasOven: e.target.checked })} />
                 &nbsp;Духовой шкаф
               </label>
               <label className="btn">
-                <input
-                  type="checkbox"
-                  checked={draft.hasDishwasher}
-                  onChange={(e) => updateDraft({ hasDishwasher: e.target.checked })}
-                />
+                <input type="checkbox" checked={draft.hasDishwasher} onChange={(e) => updateDraft({ hasDishwasher: e.target.checked })} />
                 &nbsp;Посудомоечная
               </label>
               <label className="btn">
-                <input
-                  type="checkbox"
-                  checked={draft.hasTV}
-                  onChange={(e) => updateDraft({ hasTV: e.target.checked })}
-                />
+                <input type="checkbox" checked={draft.hasTV} onChange={(e) => updateDraft({ hasTV: e.target.checked })} />
                 &nbsp;Телевизор
               </label>
               <label className="btn">
-                <input
-                  type="checkbox"
-                  checked={draft.hasWiFi}
-                  onChange={(e) => updateDraft({ hasWiFi: e.target.checked })}
-                />
+                <input type="checkbox" checked={draft.hasWiFi} onChange={(e) => updateDraft({ hasWiFi: e.target.checked })} />
                 &nbsp;Wi-Fi
               </label>
               <label className="btn">
-                <input
-                  type="checkbox"
-                  checked={draft.hasMicrowave}
-                  onChange={(e) => updateDraft({ hasMicrowave: e.target.checked })}
-                />
+                <input type="checkbox" checked={draft.hasMicrowave} onChange={(e) => updateDraft({ hasMicrowave: e.target.checked })} />
                 &nbsp;Микроволновка
               </label>
               <label className="btn">
-                <input
-                  type="checkbox"
-                  checked={draft.hasFridge}
-                  onChange={(e) => updateDraft({ hasFridge: e.target.checked })}
-                />
+                <input type="checkbox" checked={draft.hasFridge} onChange={(e) => updateDraft({ hasFridge: e.target.checked })} />
                 &nbsp;Холодильник
               </label>
 
-              {/* Type / house */}
-              <div className="field">
-                <label>Тип</label>
-                <select
-                  className="btn"
-                  value={draft.type}
-                  onChange={(e) => updateDraft({ type: e.target.value })}
-                >
-                  <option value="">Любой</option>
-                  <option value="apartment">Квартира</option>
-                  <option value="house">Дом</option>
-                </select>
-              </div>
+              {/* СПЕЦИФИКА ДЛЯ ДОМОВ */}
+              {(draft.type === "" || draft.type === "house") && (
+                <>
+                  <div className="field">
+                    <label>Свой двор</label>
+                    <select
+                      className="btn"
+                      value={String(draft.isHouseYard)}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        updateDraft({ isHouseYard: v === "" ? "" : v === "true" });
+                      }}
+                    >
+                      <option value="">Не важно</option>
+                      <option value="true">Есть</option>
+                      <option value="false">Нет</option>
+                    </select>
+                  </div>
 
-              <div className="field">
-                <label>Свой двор (для дома)</label>
-                <select
-                  className="btn"
-                  value={String(draft.isHouseYard)}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    updateDraft({ isHouseYard: v === "" ? "" : v === "true" });
-                  }}
-                >
-                  <option value="">Не важно</option>
-                  <option value="true">Есть</option>
-                  <option value="false">Нет</option>
-                </select>
-              </div>
-
-              <div className="field">
-                <label>Дом полностью/часть</label>
-                <select
-                  className="btn"
-                  value={draft.housePart}
-                  onChange={(e) => updateDraft({ housePart: e.target.value })}
-                >
-                  <option value="">Любой</option>
-                  <option value="full">Полностью</option>
-                  <option value="part">Часть дома</option>
-                </select>
-              </div>
+                  <div className="field">
+                    <label>Дом полностью/часть</label>
+                    <select
+                      className="btn"
+                      value={draft.housePart}
+                      onChange={(e) => updateDraft({ housePart: e.target.value })}
+                    >
+                      <option value="">Любой</option>
+                      <option value="full">Полностью</option>
+                      <option value="part">Часть дома</option>
+                    </select>
+                  </div>
+                </>
+              )}
             </div>
 
             <div className="row" style={{ gap: 8, marginBottom: 12 }}>
@@ -1198,6 +1256,23 @@ return (
           ) : (
             <div className="card">Не удалось загрузить объект</div>
           )}
+      </div>
+      </div>
+    )}
+
+    {picking && (
+      <div style={{
+        position:"fixed", left:0, right:0, bottom:0, display:"flex", justifyContent:"center",
+        padding:12, zIndex:200000
+      }}>
+        <div className="card" style={{display:"flex", gap:8, alignItems:"center"}}>
+          <div className="muted">Точка: {form.lat || "—"}, {form.lng || "—"}</div>
+          <button className="btn primary" onClick={() => setPicking(false)}>Поставить здесь</button>
+          <button className="btn" onClick={() => {
+            if (tempMarkerRef.current) { tempMarkerRef.current.remove(); tempMarkerRef.current = null; }
+            setForm((s)=>({ ...s, lat:"", lng:"" }));
+            setPicking(false);
+          }}>Отмена</button>
         </div>
       </div>
     )}
