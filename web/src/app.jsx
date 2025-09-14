@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import ListingFormWizard from "./admin/ListingFormWizard.jsx";
 import AdminPanel from "./admin/AdminPanel";
 import { useToast } from "./components/Toast.jsx";
 import { Routes, Route, useLocation, useNavigate } from "react-router-dom";
@@ -196,6 +197,7 @@ function Main() {
   const [creating, setCreating] = useState(false);
   const [myListings, setMyListings] = useState([]);
   const [showMy, setShowMy] = useState(false);
+  const [showWizard, setShowWizard] = useState(false);
   const [form, setForm] = useState({
     title: "",
     district: "",
@@ -222,6 +224,10 @@ function Main() {
     house_part: "",
     photos: [],
   });
+
+  const handleWizardSubmit = (data) => {
+    setForm((s) => ({ ...s, ...data }));
+  };
     const [edit, setEdit] = useState({
       id: "",
       price_amd: "",
@@ -823,11 +829,18 @@ return (
             <div className="card">
               <div style={{ fontWeight: 700, fontSize: 20, marginBottom: 8 }}>Админ-панель</div>
 
-            <div className="field">
-              <label>Admin Token</label>
-              <input className="btn" value={adminToken} onChange={(e) => setAdminToken(e.target.value)} />
-            </div>
+          <div className="field">
+            <label>Admin Token</label>
+            <input className="btn" value={adminToken} onChange={(e) => setAdminToken(e.target.value)} />
+          </div>
 
+          <div className="row" style={{ gap: 8, marginTop: 8 }}>
+            <button className="btn" onClick={() => setShowWizard(true)}>
+              Новый объект (wizard)
+            </button>
+          </div>
+
+          <hr style={{ border: "none", borderTop: "1px solid #e5e7eb", margin: "12px 0" }} />
             <hr style={{ border: "none", borderTop: "1px solid #e5e7eb", margin: "12px 0" }} />
           <div className="card" style={{ marginBottom: 16 }}>
             {!adminToken ? (
@@ -1486,6 +1499,13 @@ return (
           )}
       </div>
       </div>
+    )}
+
+    {showWizard && (
+      <ListingFormWizard
+        onClose={() => setShowWizard(false)}
+        onSubmit={handleWizardSubmit}
+      />
     )}
 
     {picking && (
