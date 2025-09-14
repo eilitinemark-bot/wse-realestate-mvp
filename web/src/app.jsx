@@ -768,7 +768,21 @@ return (
             {/* Основные поля */}
             <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
               <input className="btn" placeholder="Заголовок" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} style={{ flex: "1 1 260px" }} />
-              <input className="btn" placeholder="Район (Kentron/...)" value={form.district} onChange={(e) => setForm({ ...form, district: e.target.value })} style={{ flex: "1 1 200px" }} />
+              <select
+                className="btn"
+                value={form.district}
+                onChange={(e) => setForm({ ...form, district: e.target.value })}
+                style={{ flex: "1 1 200px" }}
+              >
+                <option value="" disabled>
+                  Район (Kentron/...)
+                </option>
+                {DISTRICTS.filter((d) => d !== "Все районы").map((d) => (
+                  <option key={d} value={d}>
+                    {d}
+                  </option>
+                ))}
+              </select>
               <select className="btn" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
                 <option value="apartment">Квартира</option>
                 <option value="house">Дом</option>
