@@ -5,10 +5,9 @@ import App from "./app.jsx"
 import { ToastProvider } from "./components/Toast.jsx"
 
 createRoot(document.getElementById("root")).render(
-  <ToastProvider>
-    <App />
-  </ToastProvider>
   <HashRouter>
-    <App />
+    <ToastProvider>
+      <App />
+    </ToastProvider>
   </HashRouter>
 )
