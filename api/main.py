@@ -12,7 +12,7 @@ import os, json
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./wse.sqlite3")
 engine = create_engine(DATABASE_URL, future=True)
 
-ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "dev123")
+ADMIN_TOKENS = [t.strip() for t in os.getenv("ADMIN_TOKENS", os.getenv("ADMIN_TOKEN", "dev123")).split(",") if t.strip()]
 USD_RATE = float(os.getenv("CURRENCY_USD_RATE", "390.0"))
 
 Base = declarative_base()
@@ -41,6 +41,7 @@ class Listing(Base):
     type = Column(String, default="apartment", index=True)  # apartment|house
     is_house_yard = Column(Boolean, default=False, index=True)
     house_part = Column(String, default="full")             # full|part
+    admin_token = Column(String, index=True)
     lat = Column(Float)
     lng = Column(Float)
     price_per_sqm = Column(Float)
@@ -169,10 +170,11 @@ app.add_middleware(
 )
 
 # --- admin helper ---
-def ensure_admin(request: Request):
+def ensure_admin(request: Request) -> str:
     token = request.headers.get("X-Admin-Token")
-    if not token or token != ADMIN_TOKEN:
+    if not token or token not in ADMIN_TOKENS:
         raise HTTPException(401, "Unauthorized")
+    return token
 
 # --- healthcheck ---
 @app.get("/api/ping")
@@ -255,14 +257,17 @@ async def upload_image(file: UploadFile = File(...)):
 # --- ADMIN CRUD ---
 @app.post("/api/admin/listings", response_model=ListingOut)
 def admin_create_listing(payload: ListingIn, request: Request):
-    ensure_admin(request)
+    token = ensure_admin(request)
     price_usd = payload.price_usd if payload.price_usd else round(payload.price_amd / USD_RATE, 2)
     price_per_sqm = round(payload.price_amd / payload.area_sqm, 2)
     with Session(engine) as s:
-        row = Listing(**payload.model_dump(exclude={"photos"}), 
-                      price_usd=price_usd,
-                      price_per_sqm=price_per_sqm,
-                      photos_json=json.dumps(payload.photos or []))
+        row = Listing(
+            **payload.model_dump(exclude={"photos", "price_usd", "price_per_sqm"}),
+            price_usd=price_usd,
+            price_per_sqm=price_per_sqm,
+            admin_token=token,
+            photos_json=json.dumps(payload.photos or []),
+        )
         s.add(row)
         s.commit()
         s.refresh(row)
@@ -272,11 +277,13 @@ def admin_create_listing(payload: ListingIn, request: Request):
 
 @app.put("/api/admin/listings/{lid}", response_model=ListingOut)
 def admin_update_listing(lid: int, payload: ListingUpdate, request: Request):
-    ensure_admin(request)
+    token = ensure_admin(request)
     with Session(engine) as s:
         row = s.get(Listing, lid)
         if not row:
             raise HTTPException(404, "Not found")
+        if row.admin_token and row.admin_token != token:
+            raise HTTPException(403, "Forbidden")
         data = payload.model_dump(exclude_unset=True)
         if "price_amd" in data and ("area_sqm" in data or row.area_sqm):
             area = data.get("area_sqm", row.area_sqm)
@@ -297,11 +304,23 @@ def admin_update_listing(lid: int, payload: ListingUpdate, request: Request):
 
 @app.delete("/api/admin/listings/{lid}")
 def admin_delete_listing(lid: int, request: Request):
-    ensure_admin(request)
+    token = ensure_admin(request)
     with Session(engine) as s:
         row = s.get(Listing, lid)
         if not row:
             return {"ok": True}
+        if row.admin_token and row.admin_token != token:
+            raise HTTPException(403, "Forbidden")
         s.delete(row)
         s.commit()
         return {"ok": True}
+
+@app.get("/api/admin/my-listings", response_model=list[ListingOut])
+def admin_my_listings(request: Request):
+    token = ensure_admin(request)
+    with Session(engine) as s:
+        rows = s.query(Listing).filter(Listing.admin_token == token).order_by(Listing.created_at.desc()).all()
+        out = [ListingOut.model_validate(r).model_dump() for r in rows]
+        for i, r in enumerate(rows):
+            out[i]["photos"] = json.loads(r.photos_json or "[]")
+        return out
