@@ -1,0 +1,9 @@
+.admin-panel {
+  position: relative;
+  z-index: 1000;
+  pointer-events: auto;
+}
+
+.admin-panel .card {
+  margin-bottom: 16px;
+}
